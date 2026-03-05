@@ -1,0 +1,287 @@
+.rich-text-editor {
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: hsl(var(--background));
+}
+
+.editor-content {
+  min-height: 300px;
+  resize: vertical;
+  overflow: auto;
+}
+
+.ProseMirror {
+  padding: 1rem;
+  min-height: 300px;
+  outline: none;
+  color: hsl(var(--foreground));
+}
+
+.ProseMirror:focus {
+  outline: none;
+}
+
+.ProseMirror .editor-text {
+  display: inline;
+}
+
+.font-size-select {
+  min-width: 80px;
+}
+
+/* Font Size Styles */
+.ProseMirror [style*="font-size"] {
+  line-height: 1.4;
+}
+
+.ProseMirror .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+  height: 0;
+}
+
+.font-size-select {
+  min-width: 80px;
+}
+
+/* Table Styles */
+.ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 1rem 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.ProseMirror td,
+.ProseMirror th {
+  border: 2px solid hsl(var(--border));
+  padding: 0.5rem;
+  position: relative;
+  min-width: 100px;
+  vertical-align: top;
+}
+
+.ProseMirror th {
+  background-color: hsl(var(--muted));
+  font-weight: bold;
+  border-bottom: 3px solid hsl(var(--border));
+}
+
+/* Table Resize Handle */
+.resize-handle {
+  position: absolute;
+  right: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 20;
+  background-color: transparent;
+}
+
+.resize-handle:hover {
+  background-color: hsl(var(--primary));
+  opacity: 0.1;
+}
+
+/* Image Styles */
+.ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1rem 0;
+  cursor: pointer;
+  position: relative;
+}
+
+.ProseMirror img.selected {
+  outline: 2px solid hsl(var(--primary));
+}
+
+.image-resizer {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+.image-resizer .resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background-color: hsl(var(--primary));
+  border-radius: 50%;
+}
+
+.image-resizer .resize-handle.top-left { top: -5px; left: -5px; cursor: nw-resize; }
+.image-resizer .resize-handle.top-right { top: -5px; right: -5px; cursor: ne-resize; }
+.image-resizer .resize-handle.bottom-left { bottom: -5px; left: -5px; cursor: sw-resize; }
+.image-resizer .resize-handle.bottom-right { bottom: -5px; right: -5px; cursor: se-resize; }
+
+/* Toolbar Styles */
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+  background-color: hsl(var(--muted));
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.5rem;
+  border-right: 1px solid hsl(var(--border));
+}
+
+.toolbar-group:last-child {
+  border-right: none;
+}
+
+.toolbar-button {
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  background: transparent;
+  border: none;
+  color: hsl(var(--foreground));
+}
+
+.toolbar-button:hover {
+  background-color: hsl(var(--accent));
+}
+
+.toolbar-button.active {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+/* Special toolbar buttons (Code Compiler & Drawing Canvas) */
+.toolbar-group-special {
+  gap: 0.375rem;
+  border-right: none;
+}
+
+.toolbar-button-special {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1.5px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  transition: all 0.15s ease;
+}
+
+.toolbar-button-special:hover {
+  border-color: hsl(var(--primary));
+  background-color: hsl(var(--primary) / 0.08);
+  color: hsl(var(--primary));
+}
+
+.toolbar-button-compiler.active {
+  background-color: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #ffffff;
+}
+
+.toolbar-button-compiler.active:hover {
+  background-color: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #ffffff;
+  opacity: 0.9;
+}
+
+.toolbar-button-paint:hover {
+  border-color: hsl(var(--primary));
+  background-color: hsl(var(--primary) / 0.08);
+  color: hsl(var(--primary));
+}
+
+/* Font Selection */
+.font-select,
+.font-size-select {
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  border: 1px solid hsl(var(--border));
+  min-width: 120px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* Selected State */
+.ProseMirror .selected-node {
+  outline: 2px solid hsl(var(--primary));
+}
+
+/* List Styles */
+.ProseMirror ul,
+.ProseMirror ol {
+  padding-left: 2rem;
+  margin: 0.5rem 0;
+}
+
+.ProseMirror ul li {
+  list-style-type: disc;
+  margin: 0.3rem 0;
+}
+
+.ProseMirror ol li {
+  list-style-type: decimal;
+  margin: 0.3rem 0;
+}
+
+.ProseMirror ul li p,
+.ProseMirror ol li p {
+  margin: 0;
+}
+
+/* Nested List Styles */
+.ProseMirror ul ul li {
+  list-style-type: circle;
+}
+
+.ProseMirror ul ul ul li {
+  list-style-type: square;
+}
+
+.ProseMirror ol ol li {
+  list-style-type: lower-alpha;
+}
+
+.ProseMirror ol ol ol li {
+  list-style-type: lower-roman;
+}
+
+/* Heading Styles */
+.ProseMirror h1 {
+  font-size: 2rem;
+  font-weight: bold;
+  margin: 1rem 0 0.5rem;
+}
+
+.ProseMirror h2 {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin: 0.75rem 0 0.5rem;
+}
+
+.ProseMirror p {
+  margin: 0.5rem 0;
+}

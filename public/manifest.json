@@ -1,0 +1,21 @@
+{
+  "name": "EduXam - Online Exam Practice Platform",
+  "short_name": "EduXam",
+  "description": "Practice exams with MCQ, subjective questions, and math support. Free for students and teachers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/eduxam-logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/eduxam-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+/* App-specific styles */
+#root {
+  min-height: 100vh;
+}
+
+/* Ensure full width layout */
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+/* Container utility */
+.container {
+  width: 100%;
+  max-width: 1280px;
+  margin-left: auto;
+  margin-right: auto;
+}

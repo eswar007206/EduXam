@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
-  User,
   Users,
   ChevronDown,
   ChevronUp,
@@ -10,7 +9,6 @@ import {
   Clock,
   CheckCircle2,
   ArrowRight,
-  FileBarChart,
   ClipboardList,
   TrendingUp,
 } from "lucide-react";

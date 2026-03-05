@@ -711,7 +711,7 @@ export default function ReviewSubmissionPage() {
                 </div>
 
                 {/* AI Feedback (for ai_teacher submissions) */}
-                {submission.evaluation_type === 'ai_teacher' && submission.evaluation_data && (() => {
+                {submission.evaluation_type === 'ai_teacher' && !!submission.evaluation_data && (() => {
                   const aiEval = submission.evaluation_data as EvaluationResult;
                   const qFeedback = aiEval.questionEvaluations?.find(
                     (qe) => qe.questionId === question.id

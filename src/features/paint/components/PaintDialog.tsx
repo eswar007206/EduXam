@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, memo } from 'react';
-import { X, Paintbrush, Save } from 'lucide-react';
+import { X, Paintbrush, Download } from 'lucide-react';
 import { PaintCanvas } from './PaintCanvas';
 import type { PaintCanvasHandle } from './PaintCanvas';
 import { PaintToolbar } from './PaintToolbar';
@@ -19,8 +19,7 @@ export const PaintDialog = memo(function PaintDialog({
   const canvasHandleRef = useRef<PaintCanvasHandle>(null);
   const history = usePaintHistory();
   const initializedRef = useRef(false);
-  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [inserted, setInserted] = useState(false);
 
   const [textInput, setTextInput] = useState<{
     visible: boolean;
@@ -38,42 +37,29 @@ export const PaintDialog = memo(function PaintDialog({
     fontSize: 16,
   });
 
-  // Auto-save: silently insert drawing into editor after each draw action (debounced)
-  const autoSave = useCallback(() => {
-    const dataUrl = canvasHandleRef.current?.toDataURL();
-    if (dataUrl) onInsert(dataUrl);
-  }, [onInsert]);
-
-  // Push canvas to history after each draw action + trigger auto-save
+  // Push canvas to history after each draw action (NO auto-insert)
   const handleDrawComplete = useCallback(() => {
     const snapshot = canvasHandleRef.current?.getSnapshot();
     if (snapshot) history.pushState(snapshot);
-    // Debounce auto-save to avoid rapid updates
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(autoSave, 500);
-    setSaved(false);
-  }, [history, autoSave]);
+    setInserted(false);
+  }, [history]);
 
   // Undo / Redo
   const handleUndo = useCallback(() => {
     const prev = history.undo();
     if (prev) {
       canvasHandleRef.current?.restoreSnapshot(prev);
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = setTimeout(autoSave, 500);
-      setSaved(false);
+      setInserted(false);
     }
-  }, [history, autoSave]);
+  }, [history]);
 
   const handleRedo = useCallback(() => {
     const next = history.redo();
     if (next) {
       canvasHandleRef.current?.restoreSnapshot(next);
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = setTimeout(autoSave, 500);
-      setSaved(false);
+      setInserted(false);
     }
-  }, [history, autoSave]);
+  }, [history]);
 
   // Clear
   const handleClear = useCallback(() => {
@@ -81,32 +67,22 @@ export const PaintDialog = memo(function PaintDialog({
     history.clear();
     const snapshot = canvasHandleRef.current?.getSnapshot();
     if (snapshot) history.pushState(snapshot);
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(autoSave, 500);
-    setSaved(false);
-  }, [history, autoSave]);
+    setInserted(false);
+  }, [history]);
 
-  // Manual save
-  const handleSave = useCallback(() => {
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSave();
-    setSaved(true);
-  }, [autoSave]);
+  // Save & Insert — only way to get drawing into the answer box
+  const handleSaveAndInsert = useCallback(() => {
+    const dataUrl = canvasHandleRef.current?.toDataURL();
+    if (dataUrl) onInsert(dataUrl);
+    setInserted(true);
+  }, [onInsert]);
 
-  // Save & close
-  const handleInsert = useCallback(() => {
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+  // Save & Insert then close
+  const handleSaveInsertAndClose = useCallback(() => {
     const dataUrl = canvasHandleRef.current?.toDataURL();
     if (dataUrl) onInsert(dataUrl);
     onClose();
   }, [onInsert, onClose]);
-
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    };
-  }, []);
 
   // Text tool click on canvas
   const handleTextToolClick = useCallback((position: Point) => {
@@ -144,12 +120,12 @@ export const PaintDialog = memo(function PaintDialog({
         handleRedo();
       } else if (e.ctrlKey && e.key === 's') {
         e.preventDefault();
-        handleSave();
+        handleSaveAndInsert();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isOpen, onClose, handleUndo, handleRedo, handleSave, textInput.visible]);
+  }, [isOpen, onClose, handleUndo, handleRedo, handleSaveAndInsert, textInput.visible]);
 
   // Push initial blank canvas state
   useEffect(() => {
@@ -286,33 +262,37 @@ export const PaintDialog = memo(function PaintDialog({
         {/* Footer */}
         <div className="paint-dialog-footer">
           <span style={{ flex: 1, fontSize: '0.75rem', color: 'hsl(var(--muted-foreground))' }}>
-            <kbd style={{ padding: '0 4px', border: '1px solid hsl(var(--border))', borderRadius: '3px', fontSize: '0.6875rem' }}>Ctrl+S</kbd> Save
+            <kbd style={{ padding: '0 4px', border: '1px solid hsl(var(--border))', borderRadius: '3px', fontSize: '0.6875rem' }}>Ctrl+S</kbd> Save & Insert
             {' / '}
             <kbd style={{ padding: '0 4px', border: '1px solid hsl(var(--border))', borderRadius: '3px', fontSize: '0.6875rem' }}>Ctrl+Z</kbd> Undo
             {' / '}
             <kbd style={{ padding: '0 4px', border: '1px solid hsl(var(--border))', borderRadius: '3px', fontSize: '0.6875rem' }}>Ctrl+Y</kbd> Redo
-            {saved && (
-              <span style={{ marginLeft: '0.5rem', color: 'hsl(var(--primary))', fontWeight: 600 }}>Saved!</span>
+            {inserted && (
+              <span style={{ marginLeft: '0.5rem', color: 'hsl(var(--primary))', fontWeight: 600 }}>Inserted!</span>
             )}
-          </span>
-          <span style={{ fontSize: '0.6875rem', color: 'hsl(var(--muted-foreground))', marginRight: '0.5rem' }}>
-            Auto-saves after each stroke
           </span>
           <button
             type="button"
-            onClick={handleSave}
+            onClick={onClose}
             className="paint-dialog-btn paint-dialog-btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}
           >
-            <Save size={14} />
-            Save
+            Close
           </button>
           <button
             type="button"
-            onClick={handleInsert}
+            onClick={handleSaveAndInsert}
+            className="paint-dialog-btn paint-dialog-btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+          >
+            <Download size={14} />
+            Save & Insert
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveInsertAndClose}
             className="paint-dialog-btn paint-dialog-btn-primary"
           >
-            Save & Close
+            Save, Insert & Close
           </button>
         </div>
       </div>

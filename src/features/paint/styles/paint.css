@@ -1,0 +1,408 @@
+/* ============================================
+   Paint Dialog — Backdrop & Container
+   ============================================ */
+
+.paint-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: hsla(0, 0%, 0%, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 1000;
+  animation: paint-backdrop-fade 200ms ease-out;
+}
+
+@keyframes paint-backdrop-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.paint-dialog {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) + 0.25rem);
+  box-shadow: 0 25px 50px -12px hsla(0, 0%, 0%, 0.25);
+  width: 95vw;
+  max-width: 980px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 1001;
+  animation: paint-dialog-slide 200ms ease-out;
+}
+
+@keyframes paint-dialog-slide {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ============================================
+   Header
+   ============================================ */
+
+.paint-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.paint-dialog-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  margin: 0;
+}
+
+.paint-dialog-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius) - 0.125rem);
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.paint-dialog-close:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+}
+
+/* ============================================
+   Content — sidebar + canvas
+   ============================================ */
+
+.paint-dialog-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.paint-dialog-sidebar {
+  width: 180px;
+  flex-shrink: 0;
+  padding: 0.75rem;
+  border-right: 1px solid hsl(var(--border));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: hsl(var(--muted) / 0.3);
+}
+
+.paint-canvas-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  overflow: auto;
+  position: relative;
+  background: hsl(var(--muted) / 0.15);
+}
+
+.paint-canvas {
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 2px 8px hsla(0, 0%, 0%, 0.08);
+  background: #ffffff;
+  max-width: 100%;
+  height: auto;
+}
+
+/* ============================================
+   Footer
+   ============================================ */
+
+.paint-dialog-footer {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.paint-dialog-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 150ms ease;
+  border: 1px solid transparent;
+}
+
+.paint-dialog-btn-secondary {
+  background: transparent;
+  border-color: hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+.paint-dialog-btn-secondary:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+}
+
+.paint-dialog-btn-primary {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.paint-dialog-btn-primary:hover {
+  opacity: 0.9;
+}
+
+/* ============================================
+   Toolbar
+   ============================================ */
+
+.paint-toolbar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.paint-toolbar-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+  letter-spacing: 0.05em;
+}
+
+.paint-toolbar-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.25rem;
+}
+
+.paint-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  transition: all 150ms ease;
+  padding: 0;
+}
+
+.paint-tool-btn.small {
+  width: auto;
+  height: auto;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.paint-tool-btn:hover {
+  background: hsl(var(--accent) / 0.3);
+  border-color: hsl(var(--border));
+}
+
+.paint-tool-btn.active {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
+}
+
+.paint-tool-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.paint-tool-btn.destructive:hover {
+  background: hsl(var(--destructive) / 0.1);
+  color: hsl(var(--destructive));
+}
+
+.paint-shape-toggle {
+  display: flex;
+  gap: 0.25rem;
+}
+
+/* ============================================
+   Color Picker
+   ============================================ */
+
+.paint-color-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+
+.paint-color-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid hsl(var(--border));
+  border-radius: 2px;
+  cursor: pointer;
+  transition: transform 100ms ease;
+  padding: 0;
+}
+
+.paint-color-swatch:hover {
+  transform: scale(1.25);
+  z-index: 1;
+}
+
+.paint-color-swatch.active {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+
+.paint-color-custom {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.25rem;
+}
+
+.paint-color-custom-label {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.paint-color-input {
+  width: 28px;
+  height: 28px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  padding: 1px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.paint-bg-preview {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 3px;
+}
+
+/* ============================================
+   Brush Size
+   ============================================ */
+
+.paint-brush-size {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.paint-brush-slider {
+  width: 100%;
+  accent-color: hsl(var(--primary));
+  height: 4px;
+}
+
+.paint-brush-presets {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.paint-brush-preset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
+  transition: all 100ms ease;
+  padding: 0;
+}
+
+.paint-brush-preset:hover {
+  border-color: hsl(var(--border));
+  background: hsl(var(--accent) / 0.3);
+}
+
+.paint-brush-preset.active {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.1);
+}
+
+.paint-brush-dot {
+  display: block;
+  background: hsl(var(--foreground));
+  border-radius: 50%;
+  min-width: 2px;
+  min-height: 2px;
+}
+
+/* ============================================
+   Text Input Overlay
+   ============================================ */
+
+.paint-text-overlay {
+  position: absolute;
+  background: transparent;
+  border: 1px dashed hsl(var(--primary));
+  outline: none;
+  min-width: 80px;
+  padding: 2px 4px;
+  font-family: Arial, sans-serif;
+  z-index: 10;
+}
+
+/* ============================================
+   Responsive (small screens)
+   ============================================ */
+
+@media (max-width: 768px) {
+  .paint-dialog-content {
+    flex-direction: column;
+  }
+
+  .paint-dialog-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid hsl(var(--border));
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow-x: auto;
+    max-height: 140px;
+  }
+
+  .paint-canvas-wrapper {
+    padding: 0.5rem;
+  }
+}
+
+/* ============================================
+   Reduced motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .paint-dialog-backdrop,
+  .paint-dialog {
+    animation: none;
+  }
+}

@@ -1,0 +1,649 @@
+/* ===== Backdrop & Container ===== */
+.graph-calc-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  animation: graph-calc-backdrop-fade 200ms ease-out;
+}
+
+@keyframes graph-calc-backdrop-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.graph-calc-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(92vw, 880px);
+  max-height: 74vh;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  animation: graph-calc-dialog-slide 200ms ease-out;
+}
+
+@keyframes graph-calc-dialog-slide {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ===== Header ===== */
+.graph-calc-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+}
+
+.graph-calc-dialog-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.graph-calc-header-icon {
+  color: hsl(var(--primary));
+}
+
+.graph-calc-dialog-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.graph-calc-dialog-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.graph-calc-dialog-close:hover {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+/* ===== Equation Area ===== */
+.graph-calc-equation-area {
+  border-bottom: 1px solid hsl(var(--border));
+  max-height: 130px;
+  overflow-y: auto;
+  background: hsl(var(--background));
+}
+
+.graph-calc-equation-panel {
+  padding: 0.5rem 0.75rem;
+}
+
+.graph-calc-equation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.graph-calc-equation-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 6px;
+  background: hsl(var(--muted) / 0.3);
+  border: 1px solid transparent;
+  transition: border-color 150ms;
+}
+
+.graph-calc-equation-row:focus-within {
+  border-color: hsl(var(--primary) / 0.3);
+}
+
+.graph-calc-equation-main {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.graph-calc-color-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid hsl(var(--background));
+  box-shadow: 0 0 0 1px hsl(var(--border));
+}
+
+.graph-calc-equation-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.graph-calc-equation-prefix {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+}
+
+.graph-calc-equation-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.25rem 0.375rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 0.8rem;
+  font-family: 'Courier New', monospace;
+  outline: none;
+  transition: border-color 150ms;
+}
+
+.graph-calc-equation-input:focus {
+  border-color: hsl(var(--primary));
+}
+
+.graph-calc-equation-input.error {
+  border-color: #ef4444;
+}
+
+.graph-calc-equation-error {
+  font-size: 0.7rem;
+  color: #ef4444;
+  padding-left: 1.5rem;
+}
+
+.graph-calc-sliders-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-left: 1.5rem;
+}
+
+.graph-calc-eq-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 150ms;
+}
+
+.graph-calc-eq-btn:hover {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+.graph-calc-eq-btn-delete:hover {
+  color: #ef4444;
+}
+
+.graph-calc-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.5rem;
+  margin-top: 0.25rem;
+  border: 1px dashed hsl(var(--border));
+  border-radius: 6px;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.graph-calc-add-btn:hover {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.05);
+}
+
+/* ===== Slider ===== */
+.graph-calc-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 120px;
+}
+
+.graph-calc-slider-label {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+}
+
+.graph-calc-slider-name {
+  font-weight: 600;
+}
+
+.graph-calc-slider-value {
+  color: hsl(var(--foreground));
+}
+
+.graph-calc-slider-input {
+  width: 80px;
+  height: 4px;
+  accent-color: hsl(var(--primary));
+  cursor: pointer;
+}
+
+/* ===== Content Layout ===== */
+.graph-calc-dialog-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.graph-calc-dialog-sidebar {
+  width: 140px;
+  flex-shrink: 0;
+  border-right: 1px solid hsl(var(--border));
+  overflow-y: auto;
+  background: hsl(var(--muted) / 0.2);
+}
+
+.graph-calc-canvas-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  background: #fafafa;
+}
+
+.graph-calc-canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  border: 1px solid hsl(var(--border));
+  background: #ffffff;
+}
+
+/* ===== Toolbar ===== */
+.graph-calc-toolbar {
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.graph-calc-toolbar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.graph-calc-toolbar-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: hsl(var(--muted-foreground));
+  padding: 0 0.125rem;
+}
+
+.graph-calc-toolbar-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+
+.graph-calc-type-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.25rem 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-size: 0.65rem;
+  cursor: pointer;
+  transition: all 150ms;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.graph-calc-type-btn:hover {
+  background: hsl(var(--primary) / 0.08);
+  border-color: hsl(var(--primary) / 0.2);
+  color: hsl(var(--primary));
+}
+
+.graph-calc-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.graph-calc-tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.graph-calc-tool-btn:hover {
+  background: hsl(var(--muted));
+}
+
+.graph-calc-tool-btn.active {
+  background: hsl(var(--primary) / 0.1);
+  border-color: hsl(var(--primary) / 0.3);
+  color: hsl(var(--primary));
+  font-weight: 600;
+}
+
+.graph-calc-zoom-controls {
+  display: flex;
+  gap: 2px;
+}
+
+.graph-calc-zoom-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.graph-calc-zoom-btn:hover {
+  background: hsl(var(--primary) / 0.08);
+  border-color: hsl(var(--primary) / 0.3);
+  color: hsl(var(--primary));
+}
+
+.graph-calc-zoom-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: hsl(var(--background));
+  border-color: hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+/* ===== Info Panels ===== */
+.graph-calc-info-tooltip {
+  position: absolute;
+  padding: 0.25rem 0.5rem;
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+  font-size: 0.7rem;
+  font-family: 'Courier New', monospace;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.graph-calc-tangent-info,
+.graph-calc-area-info {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0.75rem;
+  background: hsl(var(--background) / 0.95);
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  font-size: 0.75rem;
+  color: hsl(var(--foreground));
+  font-family: 'Courier New', monospace;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+}
+
+/* ===== Table Panel ===== */
+.graph-calc-table-panel {
+  width: 180px;
+  flex-shrink: 0;
+  border-left: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  display: flex;
+  flex-direction: column;
+}
+
+.graph-calc-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+  font-size: 0.75rem;
+  color: hsl(var(--foreground));
+}
+
+.graph-calc-table-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.graph-calc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+  font-family: 'Courier New', monospace;
+}
+
+.graph-calc-table th {
+  position: sticky;
+  top: 0;
+  padding: 0.25rem 0.5rem;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-weight: 600;
+  text-align: right;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.graph-calc-table td {
+  padding: 0.2rem 0.5rem;
+  text-align: right;
+  color: hsl(var(--foreground));
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+}
+
+.graph-calc-table tr:hover td {
+  background: hsl(var(--primary) / 0.05);
+}
+
+/* ===== Footer ===== */
+.graph-calc-dialog-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+}
+
+.graph-calc-shortcuts-hint {
+  flex: 1;
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.graph-calc-kbd {
+  display: inline-block;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 3px;
+  background: hsl(var(--muted));
+  font-size: 0.65rem;
+  font-family: inherit;
+}
+
+.graph-calc-inserted-msg {
+  margin-left: 0.5rem;
+  color: hsl(var(--primary));
+  font-weight: 600;
+}
+
+.graph-calc-dialog-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 150ms;
+  white-space: nowrap;
+}
+
+.graph-calc-dialog-btn-secondary {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.graph-calc-dialog-btn-secondary:hover {
+  background: hsl(var(--muted));
+}
+
+.graph-calc-dialog-btn-primary {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
+}
+
+.graph-calc-dialog-btn-primary:hover {
+  opacity: 0.9;
+}
+
+/* ===== Focus Visible ===== */
+.graph-calc-dialog-close:focus-visible,
+.graph-calc-eq-btn:focus-visible,
+.graph-calc-add-btn:focus-visible,
+.graph-calc-type-btn:focus-visible,
+.graph-calc-tool-btn:focus-visible,
+.graph-calc-zoom-btn:focus-visible,
+.graph-calc-dialog-btn:focus-visible,
+.graph-calc-equation-input:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .graph-calc-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .graph-calc-dialog-content {
+    flex-direction: column;
+  }
+
+  .graph-calc-dialog-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid hsl(var(--border));
+    max-height: 120px;
+    overflow-y: auto;
+  }
+
+  .graph-calc-toolbar {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .graph-calc-toolbar-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .graph-calc-table-panel {
+    width: 100%;
+    max-height: 150px;
+    border-left: none;
+    border-top: 1px solid hsl(var(--border));
+  }
+
+  .graph-calc-dialog-footer {
+    flex-wrap: wrap;
+  }
+}
+
+/* ===== Reduced Motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  .graph-calc-dialog-backdrop,
+  .graph-calc-dialog {
+    animation: none;
+  }
+}
+
+/* ===== Scrollbar ===== */
+.graph-calc-equation-area::-webkit-scrollbar,
+.graph-calc-dialog-sidebar::-webkit-scrollbar,
+.graph-calc-table-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.graph-calc-equation-area::-webkit-scrollbar-track,
+.graph-calc-dialog-sidebar::-webkit-scrollbar-track,
+.graph-calc-table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.graph-calc-equation-area::-webkit-scrollbar-thumb,
+.graph-calc-dialog-sidebar::-webkit-scrollbar-thumb,
+.graph-calc-table-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 2px;
+}

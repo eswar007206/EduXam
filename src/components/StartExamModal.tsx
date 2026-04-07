@@ -29,6 +29,7 @@ interface StartExamModalProps {
   teacherId?: string | null;
   isStudent?: boolean;
   examType?: ExamType;
+  strictModeSupported?: boolean;
 }
 
 export function StartExamModal({
@@ -44,6 +45,7 @@ export function StartExamModal({
   teacherId = null,
   isStudent = false,
   examType = "main",
+  strictModeSupported = true,
 }: StartExamModalProps) {
   const isMainExam = examType === "main";
   const [controlLoading, setControlLoading] = useState(false);
@@ -263,12 +265,14 @@ export function StartExamModal({
                 </p>
                 <p className="text-muted-foreground mt-1">
                   {isMainExam
-                    ? `${EXAM_PORTAL_LABEL} attempts use fullscreen protection and are limited to a single attempt per student account.`
+                    ? strictModeSupported
+                      ? `${EXAM_PORTAL_LABEL} attempts use fullscreen protection and are limited to a single attempt per student account.`
+                      : `${EXAM_PORTAL_LABEL} attempts are limited to a single attempt per student account and can now run on browsers without fullscreen protection support.`
                     : "Prep exams are relaxed so you can focus on repetition, learning, and improvement."}
                 </p>
               </div>
 
-              {isMainExam && examStarted && (
+              {isMainExam && examStarted && strictModeSupported && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <p className="font-semibold text-amber-900 flex items-center gap-2">
                     <ShieldAlert className="text-amber-700" size={18} />
@@ -291,6 +295,20 @@ export function StartExamModal({
                       <span>I understand the fullscreen rules and the 3-strike auto-submit policy for this exam portal.</span>
                     </label>
                   )}
+                </div>
+              )}
+
+              {isMainExam && examStarted && !strictModeSupported && (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-4">
+                  <p className="font-semibold text-sky-900 flex items-center gap-2">
+                    <ShieldAlert className="text-sky-700" size={18} />
+                    Browser compatibility mode
+                  </p>
+                  <div className="mt-3 space-y-2 text-sm text-sky-900">
+                    <p>This browser can still take the exam.</p>
+                    <p>Fullscreen protection is skipped here so the exam flow stays usable across browsers.</p>
+                    <p>Attempt limits, timing, saving, and analytics continue to work normally.</p>
+                  </div>
                 </div>
               )}
             </div>

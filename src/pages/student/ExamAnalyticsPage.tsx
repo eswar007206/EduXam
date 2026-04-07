@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -55,6 +55,7 @@ import type { SubmissionRow } from "@/lib/database.types";
 import type { EvaluationResult } from "@/services/evaluationService";
 
 type AnalyticsTab = "attempt" | "subject" | "profile";
+type AttemptViewMode = "focus" | "deep";
 type LibraryStatusFilter = "all" | "pending" | "evaluated";
 type PendingDemandPrompt = { mode: "ai" | "ai_teacher"; recentCount: number } | null;
 type ChartDatum = {
@@ -71,6 +72,7 @@ type TrendPoint = {
 };
 
 const CHART_COLORS = ["#071952", "#0284c7", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#f97316"];
+const LIBRARY_PAGE_SIZE = 8;
 
 function formatDuration(seconds: number | null | undefined) {
   if (!seconds || seconds <= 0) {
@@ -122,31 +124,18 @@ function truncateLabel(value: string, maxLength = 18) {
   return `${value.slice(0, maxLength - 1)}…`;
 }
 
+function formatChartNumber(value: number) {
+  return Number.isInteger(value)
+    ? value.toLocaleString("en-US")
+    : value.toLocaleString("en-US", { maximumFractionDigits: 1 });
+}
+
 function getSubmissionPercentage(submission: SubmissionRow): number | null {
   if (submission.total_marks <= 0 || submission.total_marks_obtained === null) {
     return null;
   }
 
   return Math.round((submission.total_marks_obtained / submission.total_marks) * 1000) / 10;
-}
-
-function buildConicGradient(data: ChartDatum[]) {
-  const positive = data.filter((item) => item.value > 0);
-  const total = positive.reduce((sum, item) => sum + item.value, 0);
-
-  if (total <= 0) {
-    return "conic-gradient(#e2e8f0 0deg 360deg)";
-  }
-
-  let running = 0;
-  const segments = positive.map((item) => {
-    const start = (running / total) * 360;
-    running += item.value;
-    const end = (running / total) * 360;
-    return `${item.color} ${start}deg ${end}deg`;
-  });
-
-  return `conic-gradient(${segments.join(", ")})`;
 }
 
 function SegmentButton({
@@ -275,61 +264,113 @@ function FilterPill({
   );
 }
 
-function DonutChartCard({
+function LibraryMetricChip({
+  label,
+  value,
+  tone = "bg-slate-100 text-slate-600",
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+}) {
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${tone}`}>
+      <span className="uppercase tracking-[0.16em] opacity-70">{label}</span>
+      <span>{value}</span>
+    </span>
+  );
+}
+
+function DistributionChartCard({
   eyebrow,
   title,
   data,
   centerValue,
   centerHint,
+  valueFormatter = formatChartNumber,
 }: {
   eyebrow: string;
   title: string;
   data: ChartDatum[];
   centerValue: string;
   centerHint: string;
+  valueFormatter?: (value: number) => string;
 }) {
   const visible = data.filter((item) => item.value > 0);
   const total = visible.reduce((sum, item) => sum + item.value, 0);
+  const displayData =
+    total > 0
+      ? data
+      : [{ label: "No data captured yet", value: 0, color: "#cbd5e1", meta: "Complete more attempts to populate this chart." }];
 
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{eyebrow}</p>
-      <h2 className="mt-2 text-xl font-bold text-slate-900">{title}</h2>
-      <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr] lg:items-center">
-        <div className="mx-auto">
-          <div
-            className="relative h-48 w-48 rounded-full"
-            style={{ background: buildConicGradient(visible.length > 0 ? visible : [{ label: "No data", value: 1, color: "#e2e8f0" }]) }}
-          >
-            <div className="absolute inset-6 flex flex-col items-center justify-center rounded-full bg-white text-center shadow-inner">
-              <span className="text-3xl font-black text-slate-900">{centerValue}</span>
-              <span className="mt-1 max-w-[110px] text-xs font-medium leading-5 text-slate-500">{centerHint}</span>
-            </div>
-          </div>
+    <section className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{eyebrow}</p>
+          <h2 className="mt-2 text-xl font-bold text-slate-900">{title}</h2>
         </div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right">
+          <p className="text-2xl font-black text-slate-900">{centerValue}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{centerHint}</p>
+        </div>
+      </div>
 
-        <div className="space-y-3">
-          {(visible.length > 0 ? visible : [{ label: "No data captured yet", value: 0, color: "#e2e8f0", meta: "Complete more attempts to populate this chart." }]).map((item, index) => {
-            const share = total > 0 ? (item.value / total) * 100 : 0;
-            return (
-              <div key={`${item.label}-${index}`} className="rounded-2xl bg-slate-50 p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: item.color }} />
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{item.label}</p>
-                      <p className="mt-1 text-xs text-slate-500">{item.meta ?? "Available in saved analytics"}</p>
-                    </div>
+      <div className="mt-6 rounded-[26px] border border-slate-200 bg-slate-50 p-4">
+        <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <span>Distribution</span>
+          <span>{total > 0 ? valueFormatter(total) : "No measurable data"}</span>
+        </div>
+        <div className="mt-4 flex h-5 overflow-hidden rounded-full bg-white shadow-inner ring-1 ring-slate-200">
+          {visible.length > 0 ? (
+            visible.map((item, index) => {
+              const share = total > 0 ? (item.value / total) * 100 : 0;
+              return (
+                <div
+                  key={`${item.label}-${index}`}
+                  className="h-full"
+                  style={{ width: `${share}%`, backgroundColor: item.color }}
+                  title={`${item.label}: ${valueFormatter(item.value)} (${share.toFixed(1)}%)`}
+                />
+              );
+            })
+          ) : (
+            <div className="h-full w-full bg-slate-200" />
+          )}
+        </div>
+        <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+          <span>0</span>
+          <span>{total > 0 ? valueFormatter(total) : "Awaiting data"}</span>
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {displayData.map((item, index) => {
+          const share = total > 0 ? (item.value / total) * 100 : 0;
+          return (
+            <div key={`${item.label}-${index}`} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3">
+                    <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: item.color }} />
+                    <p className="text-sm font-semibold text-slate-900">{item.label}</p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-slate-900">{item.value}</p>
-                    <p className="text-xs text-slate-500">{share.toFixed(1)}%</p>
-                  </div>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">{item.meta ?? "Available in saved analytics"}</p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-bold text-slate-900">{valueFormatter(item.value)}</p>
+                  <p className="text-xs text-slate-500">{share.toFixed(1)}%</p>
                 </div>
               </div>
-            );
-          })}
-        </div>
+              <div className="mt-3 h-2 rounded-full bg-white">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${Math.min(share, 100)}%`, backgroundColor: item.color }}
+                />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -340,47 +381,109 @@ function TrendChartCard({
   title,
   points,
   stroke = "#0284c7",
+  valueFormatter = formatChartNumber,
+  domainMax,
+  yAxisLabel = "Value",
 }: {
   eyebrow: string;
   title: string;
   points: TrendPoint[];
   stroke?: string;
+  valueFormatter?: (value: number) => string;
+  domainMax?: number;
+  yAxisLabel?: string;
 }) {
-  const safePoints = points.length > 0 ? points : [{ label: "No data", value: 0, valueLabel: "0", meta: "Complete more analytics to surface a trend." }];
-  const maxValue = Math.max(...safePoints.map((point) => point.value), 1);
-  const minValue = Math.min(...safePoints.map((point) => point.value), 0);
+  const safePoints =
+    points.length > 0
+      ? points
+      : [{ label: "No data", value: 0, valueLabel: "0", meta: "Complete more analytics to surface a trend." }];
+  const chart = { width: 720, height: 260, top: 24, right: 28, bottom: 46, left: 64 };
+  const innerWidth = chart.width - chart.left - chart.right;
+  const innerHeight = chart.height - chart.top - chart.bottom;
+  const maxPointValue = Math.max(...safePoints.map((point) => point.value), 0);
+  const minPointValue = Math.min(...safePoints.map((point) => point.value), 0);
+  const minValue = Math.min(0, minPointValue);
+  const maxValue = Math.max(domainMax ?? maxPointValue, 1);
   const range = Math.max(maxValue - minValue, 1);
-  const pathPoints = safePoints
-    .map((point, index) => {
-      const x = safePoints.length === 1 ? 50 : (index / (safePoints.length - 1)) * 100;
-      const y = 42 - (((point.value - minValue) / range) * 30 + 6);
-      return `${x},${y}`;
-    })
+  const gradientId = `trend-fill-${eyebrow.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+  const getX = (index: number) =>
+    safePoints.length === 1 ? chart.left + innerWidth / 2 : chart.left + (index / (safePoints.length - 1)) * innerWidth;
+  const getY = (value: number) => chart.top + innerHeight - ((value - minValue) / range) * innerHeight;
+  const linePath = safePoints
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${getX(index).toFixed(2)} ${getY(point.value).toFixed(2)}`)
     .join(" ");
+  const baselineY = getY(minValue);
+  const areaPath =
+    safePoints.length > 0
+      ? `${linePath} L ${getX(safePoints.length - 1).toFixed(2)} ${baselineY.toFixed(2)} L ${getX(0).toFixed(2)} ${baselineY.toFixed(2)} Z`
+      : "";
+  const yTicks = Array.from({ length: 5 }, (_, index) => minValue + (range / 4) * index);
+  const xLabelStep = safePoints.length <= 6 ? 1 : Math.ceil(safePoints.length / 6);
+  const insightPoints = [
+    { label: "Start", point: safePoints[0] },
+    {
+      label: "Peak",
+      point: safePoints.reduce((best, point) => (point.value > best.value ? point : best), safePoints[0]),
+    },
+    { label: "Latest", point: safePoints[safePoints.length - 1] },
+  ];
 
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{eyebrow}</p>
       <h2 className="mt-2 text-xl font-bold text-slate-900">{title}</h2>
-      <div className="mt-6 rounded-[28px] border border-slate-100 bg-slate-50 p-4">
-        <svg viewBox="0 0 100 44" className="h-44 w-full">
-          <line x1="0" y1="36" x2="100" y2="36" stroke="#cbd5e1" strokeDasharray="2 2" strokeWidth="0.5" />
-          <line x1="0" y1="24" x2="100" y2="24" stroke="#e2e8f0" strokeDasharray="2 2" strokeWidth="0.5" />
-          <line x1="0" y1="12" x2="100" y2="12" stroke="#e2e8f0" strokeDasharray="2 2" strokeWidth="0.5" />
-          <polyline fill="none" stroke={stroke} strokeWidth="2.25" strokeLinejoin="round" strokeLinecap="round" points={pathPoints} />
+      <div className="mt-6 rounded-[28px] border border-slate-200 bg-slate-50 p-4">
+        <svg viewBox={`0 0 ${chart.width} ${chart.height}`} className="h-72 w-full" role="img" aria-label={`${title} chart`}>
+          <defs>
+            <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={stroke} stopOpacity="0.22" />
+              <stop offset="100%" stopColor={stroke} stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+          <text x={chart.left} y="14" fill="#64748b" fontSize="12" fontWeight="700">
+            {yAxisLabel}
+          </text>
+          {yTicks.map((tick) => {
+            const y = getY(tick);
+            return (
+              <g key={tick}>
+                <line x1={chart.left} y1={y} x2={chart.width - chart.right} y2={y} stroke="#e2e8f0" strokeDasharray="4 6" />
+                <text x={chart.left - 12} y={y + 4} textAnchor="end" fill="#64748b" fontSize="12">
+                  {valueFormatter(tick)}
+                </text>
+              </g>
+            );
+          })}
+          <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.top + innerHeight} stroke="#cbd5e1" />
+          <line x1={chart.left} y1={chart.top + innerHeight} x2={chart.width - chart.right} y2={chart.top + innerHeight} stroke="#cbd5e1" />
+          {areaPath && <path d={areaPath} fill={`url(#${gradientId})`} />}
+          <path d={linePath} fill="none" stroke={stroke} strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
           {safePoints.map((point, index) => {
-            const x = safePoints.length === 1 ? 50 : (index / (safePoints.length - 1)) * 100;
-            const y = 42 - (((point.value - minValue) / range) * 30 + 6);
-            return <circle key={`${point.label}-${index}`} cx={x} cy={y} r="1.8" fill={stroke} />;
+            const x = getX(index);
+            const y = getY(point.value);
+            const shouldLabel = index === 0 || index === safePoints.length - 1 || index % xLabelStep === 0;
+            return (
+              <g key={`${point.label}-${index}`}>
+                <circle cx={x} cy={y} r="5" fill="#ffffff" stroke={stroke} strokeWidth="3">
+                  <title>{`${point.label}: ${point.valueLabel ?? valueFormatter(point.value)}`}</title>
+                </circle>
+                {shouldLabel && (
+                  <text x={x} y={chart.height - 16} textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="600">
+                    {truncateLabel(point.label, 14)}
+                  </text>
+                )}
+              </g>
+            );
           })}
         </svg>
       </div>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {safePoints.map((point, index) => (
-          <div key={`${point.label}-${index}`} className="rounded-2xl bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{point.label}</p>
-            <p className="mt-2 text-lg font-bold text-slate-900">{point.valueLabel ?? point.value}</p>
-            <p className="mt-1 text-xs text-slate-500">{point.meta ?? "Trend point"}</p>
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        {insightPoints.map(({ label, point }, index) => (
+          <div key={`${label}-${point.label}-${index}`} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
+            <p className="mt-1 text-sm font-semibold text-slate-600">{point.label}</p>
+            <p className="mt-2 text-lg font-bold text-slate-900">{point.valueLabel ?? valueFormatter(point.value)}</p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">{point.meta ?? "Trend point"}</p>
           </div>
         ))}
       </div>
@@ -388,38 +491,55 @@ function TrendChartCard({
   );
 }
 
-function ColumnChartCard({
+function RankedBarChartCard({
   eyebrow,
   title,
   data,
+  valueFormatter = formatChartNumber,
+  domainMax,
 }: {
   eyebrow: string;
   title: string;
   data: ChartDatum[];
+  valueFormatter?: (value: number) => string;
+  domainMax?: number;
 }) {
-  const safeData = data.length > 0 ? data : [{ label: "No data", value: 0, color: "#e2e8f0", meta: "Analytics will appear here." }];
-  const maxValue = Math.max(...safeData.map((item) => item.value), 1);
+  const safeData =
+    data.length > 0 ? data : [{ label: "No data", value: 0, color: "#cbd5e1", meta: "Analytics will appear here." }];
+  const maxValue = Math.max(domainMax ?? 0, ...safeData.map((item) => item.value), 1);
 
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{eyebrow}</p>
       <h2 className="mt-2 text-xl font-bold text-slate-900">{title}</h2>
-      <div className="mt-6 overflow-x-auto">
-        <div className="flex min-w-[420px] items-end gap-4">
-          {safeData.map((item, index) => {
-            const height = Math.max((item.value / maxValue) * 160, item.value > 0 ? 24 : 8);
-            return (
-              <div key={`${item.label}-${index}`} className="flex min-w-[88px] flex-1 flex-col items-center">
-                <p className="mb-3 text-sm font-semibold text-slate-900">{item.value}</p>
-                <div className="flex h-44 w-full items-end rounded-[24px] bg-slate-50 px-3 pb-3">
-                  <div className="w-full rounded-2xl" style={{ height, backgroundColor: item.color }} />
+      <div className="mt-6 space-y-4">
+        {safeData.map((item, index) => {
+          const width = Math.min((item.value / maxValue) * 100, 100);
+          return (
+            <div key={`${item.label}-${index}`} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3">
+                    <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: item.color }} />
+                    <p className="truncate text-sm font-semibold text-slate-900">{item.label}</p>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">{item.meta ?? "Saved analytics"}</p>
                 </div>
-                <p className="mt-3 text-center text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{truncateLabel(item.label)}</p>
-                <p className="mt-1 text-center text-[11px] leading-4 text-slate-400">{item.meta ?? "Saved analytics"}</p>
+                <p className="shrink-0 text-sm font-bold text-slate-900">{valueFormatter(item.value)}</p>
               </div>
-            );
-          })}
-        </div>
+              <div className="mt-3 h-3 rounded-full bg-white shadow-inner ring-1 ring-slate-200">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${width}%`, backgroundColor: item.color }}
+                />
+              </div>
+              <div className="mt-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                <span>0</span>
+                <span>{valueFormatter(maxValue)}</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -455,12 +575,15 @@ export default function ExamAnalyticsPage() {
   const [activeSubmission, setActiveSubmission] = useState<SubmissionRow | null>(null);
   const [activeAnalytics, setActiveAnalytics] = useState<Awaited<ReturnType<typeof getSubmissionAnalyticsBySubmissionId>>>(null);
   const [draft, setDraft] = useState<ExamAnalyticsDraft | null>(null);
+  const [attemptViewMode, setAttemptViewMode] = useState<AttemptViewMode>("focus");
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
   const [libraryStatusFilter, setLibraryStatusFilter] = useState<LibraryStatusFilter>("all");
+  const [libraryPage, setLibraryPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [processingLabel, setProcessingLabel] = useState<string | null>(null);
   const [evalProgress, setEvalProgress] = useState<EvaluationProgress | null>(null);
   const [demandPrompt, setDemandPrompt] = useState<PendingDemandPrompt>(null);
+  const primaryContentRef = useRef<HTMLDivElement | null>(null);
 
   const routeDraft = (location.state as { draft?: ExamAnalyticsDraft } | null)?.draft ?? null;
 
@@ -541,6 +664,10 @@ export default function ExamAnalyticsPage() {
       }
     }
   }, [activeSubmission, draft, selectedSubjectId, submissions]);
+
+  useEffect(() => {
+    setLibraryPage(0);
+  }, [activeTab, libraryStatusFilter, selectedSubjectId]);
 
   const attemptView = useMemo(
     () =>
@@ -821,6 +948,42 @@ export default function ExamAnalyticsPage() {
     [analyticsRows]
   );
 
+  const scrollToPrimaryContent = useCallback((behavior: ScrollBehavior = "smooth") => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      primaryContentRef.current?.scrollIntoView({
+        behavior,
+        block: "start",
+      });
+    });
+  }, []);
+
+  const handleOpenAttempt = useCallback(
+    (submissionId: string) => {
+      setActiveTab("attempt");
+      setAttemptViewMode("focus");
+
+      if (params.submissionId === submissionId) {
+        scrollToPrimaryContent();
+        return;
+      }
+
+      navigate(`/student/analytics/${submissionId}`);
+      scrollToPrimaryContent();
+    },
+    [navigate, params.submissionId, scrollToPrimaryContent]
+  );
+
+  useEffect(() => {
+    if (params.submissionId) {
+      setAttemptViewMode("focus");
+      scrollToPrimaryContent("smooth");
+    }
+  }, [params.submissionId, scrollToPrimaryContent]);
+
   const libraryAttempts = useMemo(
     () =>
       submissions
@@ -854,6 +1017,23 @@ export default function ExamAnalyticsPage() {
         }),
     [activeTab, analyticsBySubmissionId, libraryStatusFilter, params.submissionId, selectedSubjectId, submissions]
   );
+
+  const totalLibraryPages = Math.max(1, Math.ceil(libraryAttempts.length / LIBRARY_PAGE_SIZE));
+  const currentLibraryPage = Math.min(libraryPage, totalLibraryPages - 1);
+  const visibleLibraryAttempts = useMemo(
+    () =>
+      libraryAttempts.slice(
+        currentLibraryPage * LIBRARY_PAGE_SIZE,
+        currentLibraryPage * LIBRARY_PAGE_SIZE + LIBRARY_PAGE_SIZE
+      ),
+    [currentLibraryPage, libraryAttempts]
+  );
+
+  useEffect(() => {
+    if (libraryPage > totalLibraryPages - 1) {
+      setLibraryPage(Math.max(0, totalLibraryPages - 1));
+    }
+  }, [libraryPage, totalLibraryPages]);
 
   const attemptQuestionStatusData = useMemo<ChartDatum[]>(
     () => [
@@ -919,7 +1099,7 @@ export default function ExamAnalyticsPage() {
       attemptView.timeline.map((item) => ({
         label: item.label,
         value: item.activeSeconds,
-        valueLabel: `${item.activeSeconds}s`,
+        valueLabel: formatDuration(item.activeSeconds),
         meta: `${item.answers} answer events`,
       })),
     [attemptView.timeline]
@@ -1076,9 +1256,30 @@ export default function ExamAnalyticsPage() {
             <div className="rounded-3xl border border-slate-200 bg-white/85 p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Current Lens</p>
               <div className="mt-4 flex flex-wrap gap-2 rounded-full bg-slate-100 p-1">
-                <SegmentButton active={activeTab === "attempt"} label="Attempt" onClick={() => setActiveTab("attempt")} />
-                <SegmentButton active={activeTab === "subject"} label="Subject" onClick={() => setActiveTab("subject")} />
-                <SegmentButton active={activeTab === "profile"} label="Profile" onClick={() => setActiveTab("profile")} />
+                <SegmentButton
+                  active={activeTab === "attempt"}
+                  label="Attempt"
+                  onClick={() => {
+                    setActiveTab("attempt");
+                    scrollToPrimaryContent();
+                  }}
+                />
+                <SegmentButton
+                  active={activeTab === "subject"}
+                  label="Subject"
+                  onClick={() => {
+                    setActiveTab("subject");
+                    scrollToPrimaryContent();
+                  }}
+                />
+                <SegmentButton
+                  active={activeTab === "profile"}
+                  label="Profile"
+                  onClick={() => {
+                    setActiveTab("profile");
+                    scrollToPrimaryContent();
+                  }}
+                />
               </div>
 
               <div className="mt-5 rounded-2xl bg-slate-50 p-4">
@@ -1107,6 +1308,7 @@ export default function ExamAnalyticsPage() {
                       onChange={(event) => {
                         setSelectedSubjectId(event.target.value);
                         setActiveTab("subject");
+                        scrollToPrimaryContent();
                       }}
                       className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-[#071952]"
                     >
@@ -1131,97 +1333,52 @@ export default function ExamAnalyticsPage() {
           </div>
         ) : (
           <>
-            <section className="mt-8 rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                  <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-                    <FolderOpen className="h-3.5 w-3.5" />
-                    Saved Analytics Section
-                  </div>
-                  <h2 className="mt-3 text-2xl font-bold text-slate-900">Analytics library for every saved attempt</h2>
-                  <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-                    Every finished exam analytics record lives here, so you can reopen a specific attempt later,
-                    compare subjects, and move between attempt, subject, and profile views without losing the saved data.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="mr-1 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    <Filter className="h-3.5 w-3.5" />
-                    Library Filter
-                  </div>
-                  <FilterPill active={libraryStatusFilter === "all"} label="All" onClick={() => setLibraryStatusFilter("all")} />
-                  <FilterPill active={libraryStatusFilter === "pending"} label="Pending" onClick={() => setLibraryStatusFilter("pending")} />
-                  <FilterPill active={libraryStatusFilter === "evaluated"} label="Evaluated" onClick={() => setLibraryStatusFilter("evaluated")} />
-                </div>
-              </div>
-
-              <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {libraryAttempts.length > 0 ? (
-                  libraryAttempts.map((item) => (
-                    <Link
-                      key={item.submission.id}
-                      to={`/student/analytics/${item.submission.id}`}
-                      className={`rounded-3xl border p-5 transition ${
-                        item.isCurrent
-                          ? "border-[#071952]/20 bg-[#071952]/[0.03] shadow-[0_16px_50px_rgba(7,25,82,0.08)]"
-                          : "border-slate-200 bg-slate-50 hover:border-[#071952]/20 hover:bg-white"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-base font-bold text-slate-900">{item.submission.subject_name}</p>
-                          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
-                            {formatShortDate(item.submission.created_at)} - {item.submission.exam_type === "main" ? EXAM_PORTAL_LABEL : "Prep Exam"}
-                          </p>
-                        </div>
-                        <SubmissionStatusPill status={item.submission.status} />
-                      </div>
-
-                      <div className="mt-5 grid grid-cols-3 gap-3">
-                        <div className="rounded-2xl bg-white p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Score</p>
-                          <p className={`mt-2 text-sm font-bold ${gradeColor(item.percentage)}`}>{formatPercent(item.percentage)}</p>
-                        </div>
-                        <div className="rounded-2xl bg-white p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Duration</p>
-                          <p className="mt-2 text-sm font-bold text-slate-900">{formatDuration(item.submission.time_elapsed)}</p>
-                        </div>
-                        <div className="rounded-2xl bg-white p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Focus</p>
-                          <p className="mt-2 text-sm font-bold text-slate-900">
-                            {item.activeRatio !== null ? `${item.activeRatio.toFixed(1)}%` : "N/A"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex items-center justify-between gap-3 text-sm">
-                        <div className="text-slate-500">
-                          {item.submission.status === "evaluated"
-                            ? "Scored analytics ready to revisit"
-                            : item.submission.evaluation_type === "teacher"
-                            ? "Teacher review pending"
-                            : item.submission.evaluation_type === "ai_teacher"
-                            ? "Teacher final review pending"
-                            : "Saved analytics awaiting AI evaluation"}
-                        </div>
-                        <div className="inline-flex items-center gap-2 font-semibold text-[#071952]">
-                          Open
-                          <ArrowRight className="h-4 w-4" />
-                        </div>
-                      </div>
-                    </Link>
-                  ))
-                ) : (
-                  <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500 md:col-span-2 xl:col-span-3">
-                    No attempts match this filter yet. Finish an exam and the analytics record will show up here.
-                  </div>
-                )}
-              </div>
-            </section>
+            <div ref={primaryContentRef} className="scroll-mt-32" />
 
             {activeTab === "attempt" && (
               <>
+                <section className="mt-8 rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                        <FolderOpen className="h-3.5 w-3.5" />
+                        Active Attempt
+                      </div>
+                      <h2 className="mt-3 text-2xl font-bold text-slate-900">
+                        {draft?.subject_name ?? activeSubmission?.subject_name ?? "Attempt analytics"}
+                      </h2>
+                      <p className="mt-2 text-sm leading-6 text-slate-500">
+                        {draft
+                          ? "You are reviewing a finished draft before evaluation."
+                          : activeSubmission
+                          ? `${formatShortDate(activeSubmission.created_at)} - ${
+                              activeSubmission.exam_type === "main" ? EXAM_PORTAL_LABEL : "Prep Exam"
+                            }`
+                          : "Pick a saved attempt from the library to focus the page."}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col gap-3 sm:items-end">
+                      {activeSubmission && <SubmissionStatusPill status={activeSubmission.status} />}
+                      <div className="flex flex-wrap gap-2 rounded-full bg-slate-100 p-1">
+                        <SegmentButton
+                          active={attemptViewMode === "focus"}
+                          label="Focus View"
+                          onClick={() => setAttemptViewMode("focus")}
+                        />
+                        <SegmentButton
+                          active={attemptViewMode === "deep"}
+                          label="Deep Dive"
+                          onClick={() => setAttemptViewMode("deep")}
+                        />
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        Focus View keeps the core insights up front. Deep Dive opens the heavy timeline and question table.
+                      </p>
+                    </div>
+                  </div>
+                </section>
+
                 <section className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <StatCard
                     label="Total Time"
@@ -1256,32 +1413,37 @@ export default function ExamAnalyticsPage() {
                 </section>
 
                 <section className="mt-8 grid gap-6 xl:grid-cols-2">
-                  <DonutChartCard
+                  <DistributionChartCard
                     eyebrow="Attempt Mix"
                     title="Question completion split"
                     data={attemptQuestionStatusData}
                     centerValue={`${attemptView.answeredQuestions}/${attemptView.totalQuestions}`}
                     centerHint="questions answered"
                   />
-                  <DonutChartCard
+                  <DistributionChartCard
                     eyebrow="Focus Split"
                     title="Active work versus idle time"
                     data={attemptFocusData}
                     centerValue={`${attemptView.activeRatio.toFixed(1)}%`}
                     centerHint="active focus ratio"
+                    valueFormatter={formatDuration}
                   />
-                  <DonutChartCard
+                  <DistributionChartCard
                     eyebrow="Section Share"
                     title="Where the attempt spent time"
                     data={attemptSectionTimeData}
                     centerValue={formatDuration(attemptView.totalDurationSeconds)}
                     centerHint="total attempt time"
+                    valueFormatter={formatDuration}
                   />
                   <TrendChartCard
                     eyebrow="Pace Graph"
                     title="Active rhythm across the attempt"
                     points={attemptTimelinePoints}
                     stroke="#0f766e"
+                    valueFormatter={formatDuration}
+                    domainMax={300}
+                    yAxisLabel="Active time per 5m block"
                   />
                 </section>
 
@@ -1434,7 +1596,7 @@ export default function ExamAnalyticsPage() {
                   </div>
                 </section>
 
-                <section className="mt-8 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+                <section className={`mt-8 grid gap-6 ${attemptViewMode === "deep" ? "lg:grid-cols-[0.95fr_1.05fr]" : ""}`}>
                   <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                     <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Section Pacing</p>
                     <h2 className="mt-2 text-xl font-bold text-slate-900">How time moved across sections</h2>
@@ -1464,81 +1626,105 @@ export default function ExamAnalyticsPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Attempt Timeline</p>
-                    <h2 className="mt-2 text-xl font-bold text-slate-900">Pace blocks every 5 minutes</h2>
-                    <div className="mt-5 space-y-4">
-                      {attemptView.timeline.map((item, index) => (
-                        <div key={`${item.label}-${index}`} className="rounded-2xl bg-slate-50 p-4">
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="font-semibold text-slate-800">{item.label}</span>
-                            <span className="text-slate-500">{item.answers} answer events</span>
+                  {attemptViewMode === "deep" && (
+                    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Attempt Timeline</p>
+                      <h2 className="mt-2 text-xl font-bold text-slate-900">Pace blocks every 5 minutes</h2>
+                      <div className="mt-5 space-y-4">
+                        {attemptView.timeline.map((item, index) => (
+                          <div key={`${item.label}-${index}`} className="rounded-2xl bg-slate-50 p-4">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-semibold text-slate-800">{item.label}</span>
+                              <span className="text-slate-500">{item.answers} answer events</span>
+                            </div>
+                            <div className="mt-3 grid gap-2">
+                              <BarRow label="Active time" value={item.activeSeconds} total={300} tone="from-emerald-500 to-teal-400" suffix="s" />
+                            </div>
                           </div>
-                          <div className="mt-3 grid gap-2">
-                            <BarRow label="Active time" value={item.activeSeconds} total={300} tone="from-emerald-500 to-teal-400" suffix="s" />
-                          </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </section>
 
-                <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Question Grid</p>
-                      <h2 className="mt-2 text-xl font-bold text-slate-900">Per-question analytics</h2>
+                {attemptViewMode === "deep" ? (
+                  <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Question Grid</p>
+                        <h2 className="mt-2 text-xl font-bold text-slate-900">Per-question analytics</h2>
+                      </div>
+                      <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                        {attemptView.questions.length} questions
+                      </div>
                     </div>
-                    <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                      {attemptView.questions.length} questions
-                    </div>
-                  </div>
-                  <div className="mt-5 overflow-x-auto">
-                    <table className="min-w-full text-left">
-                      <thead>
-                        <tr className="border-b border-slate-200 text-xs uppercase tracking-[0.18em] text-slate-400">
-                          <th className="px-3 py-3">Question</th>
-                          <th className="px-3 py-3">Status</th>
-                          <th className="px-3 py-3">Time</th>
-                          <th className="px-3 py-3">Visits</th>
-                          <th className="px-3 py-3">Edits</th>
-                          <th className="px-3 py-3">Typing</th>
-                          <th className="px-3 py-3">Score</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {attemptView.questions.map((question, index) => (
-                          <tr key={`${question.sectionId}-${question.questionId}-${index}`} className="border-b border-slate-100 align-top">
-                            <td className="px-3 py-4">
-                              <p className="font-semibold text-slate-900">{question.questionLabel}</p>
-                              <p className="mt-1 max-w-md text-sm text-slate-500">{question.questionText}</p>
-                            </td>
-                            <td className="px-3 py-4">
-                              <QuestionStatusPill status={question.finalStatus} />
-                            </td>
-                            <td className="px-3 py-4 text-sm text-slate-600">{formatDuration(question.timeSpentSeconds)}</td>
-                            <td className="px-3 py-4 text-sm text-slate-600">
-                              {question.visits} visits
-                              <div className="text-xs text-slate-400">{question.revisits} revisits</div>
-                            </td>
-                            <td className="px-3 py-4 text-sm text-slate-600">
-                              {question.answerChanges} edits
-                              <div className="text-xs text-slate-400">{question.markForReviewCount} marked</div>
-                            </td>
-                            <td className="px-3 py-4 text-sm text-slate-600">
-                              {question.typingWords} words
-                              <div className="text-xs text-slate-400">{question.backspaceCount} backspaces</div>
-                            </td>
-                            <td className={`px-3 py-4 text-sm font-semibold ${gradeColor(question.scorePercentage)}`}>
-                              {question.scorePercentage === null ? "Pending" : `${question.marksAwarded}/${question.maxMarks}`}
-                              {question.feedback && <div className="mt-1 max-w-xs text-xs font-normal text-slate-400">{question.feedback}</div>}
-                            </td>
+                    <div className="mt-5 overflow-x-auto">
+                      <table className="min-w-full text-left">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-xs uppercase tracking-[0.18em] text-slate-400">
+                            <th className="px-3 py-3">Question</th>
+                            <th className="px-3 py-3">Status</th>
+                            <th className="px-3 py-3">Time</th>
+                            <th className="px-3 py-3">Visits</th>
+                            <th className="px-3 py-3">Edits</th>
+                            <th className="px-3 py-3">Typing</th>
+                            <th className="px-3 py-3">Score</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
+                        </thead>
+                        <tbody>
+                          {attemptView.questions.map((question, index) => (
+                            <tr key={`${question.sectionId}-${question.questionId}-${index}`} className="border-b border-slate-100 align-top">
+                              <td className="px-3 py-4">
+                                <p className="font-semibold text-slate-900">{question.questionLabel}</p>
+                                <p className="mt-1 max-w-md text-sm text-slate-500">{question.questionText}</p>
+                              </td>
+                              <td className="px-3 py-4">
+                                <QuestionStatusPill status={question.finalStatus} />
+                              </td>
+                              <td className="px-3 py-4 text-sm text-slate-600">{formatDuration(question.timeSpentSeconds)}</td>
+                              <td className="px-3 py-4 text-sm text-slate-600">
+                                {question.visits} visits
+                                <div className="text-xs text-slate-400">{question.revisits} revisits</div>
+                              </td>
+                              <td className="px-3 py-4 text-sm text-slate-600">
+                                {question.answerChanges} edits
+                                <div className="text-xs text-slate-400">{question.markForReviewCount} marked</div>
+                              </td>
+                              <td className="px-3 py-4 text-sm text-slate-600">
+                                {question.typingWords} words
+                                <div className="text-xs text-slate-400">{question.backspaceCount} backspaces</div>
+                              </td>
+                              <td className={`px-3 py-4 text-sm font-semibold ${gradeColor(question.scorePercentage)}`}>
+                                {question.scorePercentage === null ? "Pending" : `${question.marksAwarded}/${question.maxMarks}`}
+                                {question.feedback && <div className="mt-1 max-w-xs text-xs font-normal text-slate-400">{question.feedback}</div>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                ) : (
+                  <section className="mt-8 rounded-3xl border border-dashed border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Deep Detail Hidden</p>
+                        <h2 className="mt-2 text-xl font-bold text-slate-900">Question-by-question data is tucked away for now</h2>
+                        <p className="mt-2 text-sm text-slate-500">
+                          Switch to Deep Dive when you want the full timeline and per-question breakdown without loading the page with tables by default.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAttemptViewMode("deep")}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-[#071952] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#071952]/90"
+                      >
+                        Open Deep Dive
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </section>
+                )}
               </>
             )}
 
@@ -1552,7 +1738,7 @@ export default function ExamAnalyticsPage() {
                 </section>
 
                 <section className="mt-8 grid gap-6 xl:grid-cols-2">
-                  <DonutChartCard
+                  <DistributionChartCard
                     eyebrow="Attempt State"
                     title="Subject evaluation split"
                     data={subjectAttemptMixData}
@@ -1564,20 +1750,24 @@ export default function ExamAnalyticsPage() {
                     title="How recent attempts are moving"
                     points={subjectRecentTrendPoints}
                     stroke="#0284c7"
+                    valueFormatter={(value) => `${value.toFixed(1)}%`}
+                    domainMax={100}
+                    yAxisLabel="Score / focus ratio"
                   />
-                  <ColumnChartCard
+                  <RankedBarChartCard
                     eyebrow="Section Cost"
                     title="Average time spent per section"
                     data={subjectSectionChartData}
+                    valueFormatter={formatDuration}
                   />
-                  <ColumnChartCard
+                  <RankedBarChartCard
                     eyebrow="Question Hotspots"
                     title="Questions absorbing the most editing"
                     data={subjectView.questionRollup.slice(0, 6).map((question, index) => ({
                       label: question.questionLabel,
                       value: question.averageAnswerChanges,
                       color: CHART_COLORS[index % CHART_COLORS.length],
-                      meta: `${question.averageTimeSeconds}s average time`,
+                      meta: `${formatDuration(question.averageTimeSeconds)} average time`,
                     }))}
                   />
                 </section>
@@ -1588,7 +1778,12 @@ export default function ExamAnalyticsPage() {
                       <h2 className="mt-2 text-xl font-bold text-slate-900">Subject momentum</h2>
                     <div className="mt-5 space-y-4">
                       {subjectView.recentAttempts.map((attempt) => (
-                        <Link key={attempt.submissionId} to={`/student/analytics/${attempt.submissionId}`} className="block rounded-2xl bg-slate-50 p-4 transition hover:bg-slate-100">
+                        <button
+                          key={attempt.submissionId}
+                          type="button"
+                          onClick={() => handleOpenAttempt(attempt.submissionId)}
+                          className="block w-full rounded-2xl bg-slate-50 p-4 text-left transition hover:bg-slate-100"
+                        >
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold text-slate-900">{attempt.label}</p>
@@ -1599,7 +1794,7 @@ export default function ExamAnalyticsPage() {
                               <p className="text-xs font-normal text-slate-400">{attempt.activeRatio ? `${attempt.activeRatio}% active` : "Partial analytics"}</p>
                             </div>
                           </div>
-                        </Link>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -1661,7 +1856,7 @@ export default function ExamAnalyticsPage() {
                 </section>
 
                 <section className="mt-8 grid gap-6 xl:grid-cols-2">
-                  <DonutChartCard
+                  <DistributionChartCard
                     eyebrow="Profile Mix"
                     title="Evaluated versus pending attempts"
                     data={profileAttemptMixData}
@@ -1673,16 +1868,23 @@ export default function ExamAnalyticsPage() {
                     title="Latest attempt trend across the profile"
                     points={profileRecentTrendPoints}
                     stroke="#7c3aed"
+                    valueFormatter={(value) => `${value.toFixed(1)}%`}
+                    domainMax={100}
+                    yAxisLabel="Score / focus ratio"
                   />
-                  <ColumnChartCard
+                  <RankedBarChartCard
                     eyebrow="Subject Scores"
                     title="Average score by subject"
                     data={profileSubjectScoreData}
+                    valueFormatter={(value) => `${value.toFixed(1)}%`}
+                    domainMax={100}
                   />
-                  <ColumnChartCard
+                  <RankedBarChartCard
                     eyebrow="Subject Focus"
                     title="Average focus quality by subject"
                     data={profileSubjectFocusData}
+                    valueFormatter={(value) => `${value.toFixed(1)}%`}
+                    domainMax={100}
                   />
                 </section>
 
@@ -1719,7 +1921,12 @@ export default function ExamAnalyticsPage() {
                     <h2 className="mt-2 text-xl font-bold text-slate-900">Latest exam rhythm</h2>
                     <div className="mt-5 space-y-3">
                       {profileView.recentAttempts.map((attempt) => (
-                        <Link key={attempt.submissionId} to={`/student/analytics/${attempt.submissionId}`} className="flex items-center justify-between gap-4 rounded-2xl bg-slate-50 p-4 transition hover:bg-slate-100">
+                        <button
+                          key={attempt.submissionId}
+                          type="button"
+                          onClick={() => handleOpenAttempt(attempt.submissionId)}
+                          className="flex w-full items-center justify-between gap-4 rounded-2xl bg-slate-50 p-4 text-left transition hover:bg-slate-100"
+                        >
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-slate-900">{attempt.subjectName}</p>
                             <p className="mt-1 text-xs text-slate-500">
@@ -1737,7 +1944,7 @@ export default function ExamAnalyticsPage() {
                               {attempt.activeRatio ? ` - ${attempt.activeRatio}% active` : " - Partial analytics"}
                             </p>
                           </div>
-                        </Link>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -1770,6 +1977,7 @@ export default function ExamAnalyticsPage() {
                           onClick={() => {
                             setSelectedSubjectId(subject.subjectId);
                             setActiveTab("subject");
+                            scrollToPrimaryContent();
                           }}
                           className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#071952] transition hover:text-[#071952]/80"
                         >
@@ -1782,6 +1990,125 @@ export default function ExamAnalyticsPage() {
                 </section>
               </>
             )}
+
+            <section className="mt-8 rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    Saved Attempt Library
+                  </div>
+                  <h2 className="mt-3 text-2xl font-bold text-slate-900">Analytics library for every saved attempt</h2>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+                    The library is now a compact navigator instead of a giant wall of cards. Open an attempt to swap the main panel above without losing your place.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-3 xl:items-end">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="mr-1 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                      <Filter className="h-3.5 w-3.5" />
+                      Library Filter
+                    </div>
+                    <FilterPill active={libraryStatusFilter === "all"} label="All" onClick={() => setLibraryStatusFilter("all")} />
+                    <FilterPill active={libraryStatusFilter === "pending"} label="Pending" onClick={() => setLibraryStatusFilter("pending")} />
+                    <FilterPill active={libraryStatusFilter === "evaluated"} label="Evaluated" onClick={() => setLibraryStatusFilter("evaluated")} />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span>
+                      Showing {libraryAttempts.length === 0 ? 0 : currentLibraryPage * LIBRARY_PAGE_SIZE + 1}
+                      -
+                      {Math.min((currentLibraryPage + 1) * LIBRARY_PAGE_SIZE, libraryAttempts.length)} of {libraryAttempts.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setLibraryPage((current) => Math.max(0, current - 1))}
+                      disabled={currentLibraryPage === 0}
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 font-semibold text-slate-600 transition hover:border-[#071952]/20 hover:text-[#071952] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" />
+                      Prev
+                    </button>
+                    <span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-600">
+                      Page {currentLibraryPage + 1}/{totalLibraryPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setLibraryPage((current) => Math.min(totalLibraryPages - 1, current + 1))}
+                      disabled={currentLibraryPage >= totalLibraryPages - 1}
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 font-semibold text-slate-600 transition hover:border-[#071952]/20 hover:text-[#071952] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Next
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-3 xl:grid-cols-2">
+                {visibleLibraryAttempts.length > 0 ? (
+                  visibleLibraryAttempts.map((item) => (
+                    <button
+                      key={item.submission.id}
+                      type="button"
+                      onClick={() => handleOpenAttempt(item.submission.id)}
+                      className={`rounded-3xl border p-4 text-left transition ${
+                        item.isCurrent
+                          ? "border-[#071952]/20 bg-[#071952]/[0.03] shadow-[0_16px_50px_rgba(7,25,82,0.08)]"
+                          : "border-slate-200 bg-slate-50 hover:border-[#071952]/20 hover:bg-white"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="truncate text-base font-bold text-slate-900">{item.submission.subject_name}</p>
+                          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
+                            {formatShortDate(item.submission.created_at)} -{" "}
+                            {item.submission.exam_type === "main" ? EXAM_PORTAL_LABEL : "Prep Exam"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <SubmissionStatusPill status={item.submission.status} />
+                          <span className="inline-flex items-center gap-2 text-sm font-semibold text-[#071952]">
+                            {item.isCurrent ? "Viewing" : "Open"}
+                            <ArrowRight className="h-4 w-4" />
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <LibraryMetricChip
+                          label="Score"
+                          value={formatPercent(item.percentage)}
+                          tone={item.percentage !== null ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}
+                        />
+                        <LibraryMetricChip label="Duration" value={formatDuration(item.submission.time_elapsed)} />
+                        <LibraryMetricChip
+                          label="Focus"
+                          value={item.activeRatio !== null ? `${item.activeRatio.toFixed(1)}%` : "N/A"}
+                          tone="bg-sky-50 text-sky-700"
+                        />
+                        {item.typingWpm !== null && <LibraryMetricChip label="Typing" value={`${item.typingWpm.toFixed(1)} WPM`} tone="bg-violet-50 text-violet-700" />}
+                      </div>
+
+                      <p className="mt-4 text-sm text-slate-500">
+                        {item.submission.status === "evaluated"
+                          ? "Scored analytics ready to revisit."
+                          : item.submission.evaluation_type === "teacher"
+                          ? "Teacher review pending."
+                          : item.submission.evaluation_type === "ai_teacher"
+                          ? "Teacher final review pending."
+                          : "Saved analytics awaiting AI evaluation."}
+                      </p>
+                    </button>
+                  ))
+                ) : (
+                  <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500 xl:col-span-2">
+                    No attempts match this filter yet. Finish an exam and the analytics record will show up here.
+                  </div>
+                )}
+              </div>
+            </section>
           </>
         )}
       </div>

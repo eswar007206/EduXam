@@ -364,7 +364,13 @@ export default function ExamPracticePage() {
       ?.subjects.find((subject) => subject.id === selectedSubject) ?? null;
   }, [visibleDepartments, selectedDepartment, selectedSubject]);
   const currentExamType = selectedSubjectMeta?.examType ?? "main";
-  const requiresStrictExamMode = currentExamType === "main" && profile?.role === "student";
+  const isStudentMainExam = currentExamType === "main" && profile?.role === "student";
+  const browserSupportsStrictExamMode =
+    typeof document !== "undefined" &&
+    typeof document.documentElement.requestFullscreen === "function" &&
+    typeof document.exitFullscreen === "function";
+  const [strictModeSupported, setStrictModeSupported] = useState(browserSupportsStrictExamMode);
+  const requiresStrictExamMode = isStudentMainExam && strictModeSupported;
 
   const ensureAnalyticsSnapshot = useCallback(
     (startedAt?: string | null) => {
@@ -1313,14 +1319,43 @@ export default function ExamPracticePage() {
 
   // â”€â”€â”€ ANTI-CHEATING: Helper to enter fullscreen and lock Escape/F11 etc. â”€â”€â”€
   const enterFullscreenWithLock = (): Promise<void> => {
-    return document.documentElement.requestFullscreen({ navigationUI: "hide" } as FullscreenOptions).then(() => {
-      setIsFullScreen(true);
+    const requestFullscreen = document.documentElement.requestFullscreen?.bind(document.documentElement);
+    if (!requestFullscreen) {
+      setStrictModeSupported(false);
+      setIsFullScreen(false);
+      setShowLeaveWarning(false);
+      setLeaveCountdown(null);
+      return Promise.resolve();
+    }
+
+    const applyKeyboardLock = () => {
       if ('keyboard' in navigator && 'lock' in (navigator as any).keyboard) {
         (navigator as any).keyboard.lock(['Escape', 'F11', 'F5', 'BrowserBack', 'BrowserForward', 'MetaLeft', 'MetaRight']).catch(() => {
           (navigator as any).keyboard.lock().catch(() => {});
         });
       }
-    });
+    };
+
+    return requestFullscreen({ navigationUI: "hide" } as FullscreenOptions)
+      .catch(() => requestFullscreen())
+      .then(() => {
+        if (!document.fullscreenElement) {
+          setStrictModeSupported(false);
+          setIsFullScreen(false);
+          setShowLeaveWarning(false);
+          setLeaveCountdown(null);
+          return;
+        }
+
+        setIsFullScreen(true);
+        applyKeyboardLock();
+      })
+      .catch(() => {
+        setStrictModeSupported(false);
+        setIsFullScreen(false);
+        setShowLeaveWarning(false);
+        setLeaveCountdown(null);
+      });
   };
 
   // â”€â”€â”€ ANTI-CHEATING: On fullscreen exit show overlay with 10s countdown â”€â”€â”€
@@ -1845,6 +1880,7 @@ export default function ExamPracticePage() {
               teacherId={selectedSubjectMeta?.teacherId}
               isStudent={profile?.role === "student"}
               examType={selectedSubjectMeta?.examType ?? "main"}
+              strictModeSupported={strictModeSupported}
             />
           </div>
         </div>
@@ -1965,17 +2001,25 @@ export default function ExamPracticePage() {
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">
                   {currentExamType === "main"
-                    ? `Teacher-controlled ${EXAM_PORTAL_LABEL.toLowerCase()}. Each student account can submit only once, and 3 confirmed fullscreen violations auto-submit the paper.`
+                    ? requiresStrictExamMode
+                      ? `Teacher-controlled ${EXAM_PORTAL_LABEL.toLowerCase()}. Each student account can submit only once, and 3 confirmed fullscreen violations auto-submit the paper.`
+                      : `Teacher-controlled ${EXAM_PORTAL_LABEL.toLowerCase()}. Each student account can submit only once, and this browser is running without fullscreen enforcement.`
                     : "Practice exam with unlimited student attempts and flexible review options."}
                 </p>
               </div>
               <div className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium ${
-                requiresStrictExamMode
-                  ? "border border-amber-200 bg-amber-50 text-amber-700"
+                currentExamType === "main"
+                  ? requiresStrictExamMode
+                    ? "border border-amber-200 bg-amber-50 text-amber-700"
+                    : "border border-sky-200 bg-sky-50 text-sky-700"
                   : "border border-sky-200 bg-sky-50 text-sky-700"
               }`}>
                 <Clock size={16} />
-                {requiresStrictExamMode ? `${EXAM_PORTAL_LABEL} mode active` : "Practice mode active"}
+                {currentExamType === "main"
+                  ? requiresStrictExamMode
+                    ? `${EXAM_PORTAL_LABEL} mode active`
+                    : `${EXAM_PORTAL_LABEL} compatibility mode`
+                  : "Practice mode active"}
               </div>
             </div>
           </motion.div>
@@ -1992,10 +2036,10 @@ export default function ExamPracticePage() {
                 <div className="space-y-4">
                   <p>
                     {timeRemaining <= 0
-                      ? requiresStrictExamMode
+                      ? currentExamType === "main"
                         ? "Your exam portal time has ended. Continue to analytics to review the attempt and submit it."
                         : "Your prep exam time has ended. Continue to analytics to choose evaluation and review your attempt."
-                      : requiresStrictExamMode
+                      : currentExamType === "main"
                         ? "Are you sure you want to end the exam portal? We will lock the attempt and open its analytics page."
                         : "Are you sure you want to end this prep exam? We will lock the attempt and open its analytics page."}
                   </p>

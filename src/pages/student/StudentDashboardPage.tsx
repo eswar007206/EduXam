@@ -221,6 +221,13 @@ export default function StudentDashboardPage() {
         visible: showStudentResults,
       },
       {
+        title: "Analytics Hub",
+        description: "Open attempt, subject, and profile analytics from one page.",
+        to: "/student/analytics",
+        icon: BarChart3,
+        visible: showStudentResults,
+      },
+      {
         title: "Job Board",
         description: "Browse live openings matched to your exam-backed skills.",
         to: "/jobs",

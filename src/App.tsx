@@ -14,6 +14,7 @@ const AuthPage = lazy(() => import('./pages/auth/AuthPage'));
 const StudentDashboardPage = lazy(() => import('./pages/student/StudentDashboardPage'));
 const TeachersPage = lazy(() => import('./pages/student/TeachersPage'));
 const MyResultsPage = lazy(() => import('./pages/student/MyResultsPage'));
+const ExamAnalyticsPage = lazy(() => import('./pages/student/ExamAnalyticsPage'));
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout'));
 const DashboardPage = lazy(() => import('./pages/admin/DashboardPage'));
 const SubjectsPage = lazy(() => import('./pages/admin/SubjectsPage'));
@@ -126,6 +127,8 @@ function App() {
               </Route>
               <Route element={<StudentOrganizationFeatureGuard feature="my_results" fallbackTo="/student/dashboard" />}>
                 <Route path="/my-results" element={<MyResultsPage />} />
+                <Route path="/student/analytics" element={<ExamAnalyticsPage />} />
+                <Route path="/student/analytics/:submissionId" element={<ExamAnalyticsPage />} />
               </Route>
               <Route element={<StudentOrganizationFeatureGuard feature="my_profile" fallbackTo="/student/dashboard" />}>
                 <Route path="/edit-profile" element={<EditProfilePage />} />

@@ -202,6 +202,19 @@ export async function getStudentEvaluations(
   return (data ?? []) as SubmissionRow[];
 }
 
+export async function getStudentSubmissions(
+  studentId: string
+): Promise<SubmissionRow[]> {
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("*")
+    .eq("student_id", studentId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as SubmissionRow[];
+}
+
 export async function getStudentEvaluationById(
   id: string,
   studentId: string

@@ -22,10 +22,10 @@ import {
   Settings,
   X,
   Loader2,
-  UserCheck,
   ShieldAlert,
   Clock,
   AlertTriangle,
+  BarChart3,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import HeroBg from "@/assets/vecteezy_abstract-boxes-background-modern-technology-with-square_8171873.jpg";
@@ -51,6 +51,25 @@ import { saveTestResult, getStudentProgress, type SubjectProgress } from "@/serv
 import { createSubmission, getRecentSubmissionCount } from "@/services/submissionService";
 import { sendParentNotification } from "@/services/emailService";
 import { reportExamViolation } from "@/services/examViolationService";
+import {
+  clearExamAnalyticsDraft,
+  createExamAnalyticsSnapshot,
+  finalizeExamAnalyticsDraft,
+  recordBackspace,
+  recordClipboardEvent,
+  recordFocusGain,
+  recordFocusLoss,
+  recordFullscreenExit,
+  recordMcqAnswerChange,
+  recordQuestionEntry,
+  recordReviewToggle,
+  recordTextAnswerChange,
+  saveExamAnalyticsDraft,
+  syncExamAnalyticsSnapshot,
+  type ExamAnalyticsSnapshot,
+  type NavigationKind,
+  upsertSubmissionAnalytics,
+} from "@/services/examAnalyticsService";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -125,6 +144,7 @@ interface SavedProgress {
   inlineCompilerOpen?: boolean;
   inlineCompilerCode?: string;
   inlineCompilerLang?: string;
+  analytics?: ExamAnalyticsSnapshot;
 }
 
 export default function ExamPracticePage() {
@@ -231,6 +251,17 @@ export default function ExamPracticePage() {
     }
     return [];
   });
+  const analyticsRef = useRef<ExamAnalyticsSnapshot | null>(
+    savedProgress?.analytics
+      ? createExamAnalyticsSnapshot(
+          savedProgress.examSections ?? [],
+          savedProgress.examStartTime ?? undefined,
+          savedProgress.analytics
+        )
+      : null
+  );
+  const nextNavigationKindRef = useRef<NavigationKind>("start");
+  const focusTrackedRef = useRef(false);
 
   const [currentSectionIndex, setCurrentSectionIndex] = useState(savedProgress?.currentSectionIndex || 0);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(savedProgress?.currentQuestionIndex || 0);
@@ -335,6 +366,18 @@ export default function ExamPracticePage() {
   const currentExamType = selectedSubjectMeta?.examType ?? "main";
   const requiresStrictExamMode = currentExamType === "main" && profile?.role === "student";
 
+  const ensureAnalyticsSnapshot = useCallback(
+    (startedAt?: string | null) => {
+      analyticsRef.current = createExamAnalyticsSnapshot(
+        examSections,
+        startedAt ?? examStartTime ?? undefined,
+        analyticsRef.current
+      );
+      return analyticsRef.current;
+    },
+    [examSections, examStartTime]
+  );
+
   useEffect(() => {
     if (isLoadingDepartments || !selectedSubject) return;
 
@@ -347,9 +390,47 @@ export default function ExamPracticePage() {
       setSelectedSubject(null);
       setShowSubjectSelector(true);
       setHasStarted(false);
+      analyticsRef.current = null;
+      clearExamAnalyticsDraft();
       localStorage.removeItem(progressStorageKey);
     }
   }, [isLoadingDepartments, visibleDepartments, selectedSubject, progressStorageKey]);
+
+  useEffect(() => {
+    if (!selectedSubject || examSections.length === 0) {
+      analyticsRef.current = null;
+      return;
+    }
+
+    analyticsRef.current = createExamAnalyticsSnapshot(
+      examSections,
+      examStartTime ?? undefined,
+      analyticsRef.current
+    );
+  }, [examSections, examStartTime, selectedSubject]);
+
+  useEffect(() => {
+    if (!hasStarted || !currentQuestion || !currentSection) return;
+
+    const snapshot = ensureAnalyticsSnapshot(examStartTime ?? undefined);
+    recordQuestionEntry(
+      snapshot,
+      currentQuestion,
+      currentSection,
+      currentQuestionIndex,
+      nextNavigationKindRef.current,
+      Date.now(),
+      document.hidden
+    );
+    nextNavigationKindRef.current = "jump";
+  }, [
+    hasStarted,
+    currentQuestion,
+    currentQuestionIndex,
+    currentSection,
+    ensureAnalyticsSnapshot,
+    examStartTime,
+  ]);
 
   // Calculate total questions and progress
   const totalQuestions = examSections.reduce((acc, section) => acc + section.questions.length, 0);
@@ -375,10 +456,12 @@ export default function ExamPracticePage() {
     // Check if resuming existing session for same subject
     if (savedProgress?.selectedSubject === subjectId) {
       // Show start dialog for resume as well (keep state preserved)
+      nextNavigationKindRef.current = "resume";
       setShowStartDialog(true);
       return;
     }
 
+    clearExamAnalyticsDraft();
     setSelectedDepartment(departmentId);
     setSelectedSubject(subjectId);
     const department = departments.find(d => d.id === departmentId);
@@ -400,12 +483,94 @@ export default function ExamPracticePage() {
       setExamStartTime(null);
       setExamDurationMinutes(90);
       setStreak(0);
+      analyticsRef.current = createExamAnalyticsSnapshot(sections);
+      nextNavigationKindRef.current = "start";
 
       // Always show start dialog for NEW selection
       setShowStartDialog(true);
       setHasStarted(false);
     }
   };
+
+  const buildAnalyticsDraftFromCurrentAttempt = useCallback(
+    (options?: { submittedDueToViolations?: boolean }) => {
+      if (!profile || !selectedSubject || !selectedDepartment) {
+        return null;
+      }
+
+      const department = departments.find((item) => item.id === selectedDepartment);
+      const subject = department?.subjects.find((item) => item.id === selectedSubject);
+      if (!subject) {
+        return null;
+      }
+
+      const snapshot = ensureAnalyticsSnapshot(examStartTime ?? new Date().toISOString());
+      return finalizeExamAnalyticsDraft({
+        studentId: profile.id,
+        studentName: profile.username,
+        teacherId: subject.teacherId ?? null,
+        subjectId: subject.subjectUuid || selectedSubject,
+        subjectSlug: selectedSubject,
+        subjectName: subject.name,
+        examType: subject.examType ?? currentExamType,
+        totalMarks,
+        timeElapsed,
+        examStartedAt: examStartTime ?? snapshot.started_at,
+        examSections,
+        answers,
+        mcqAnswers,
+        questionStatus,
+        analyticsSnapshot: snapshot,
+        submittedDueToViolations: options?.submittedDueToViolations ?? false,
+      });
+    },
+    [
+      answers,
+      currentExamType,
+      departments,
+      ensureAnalyticsSnapshot,
+      examSections,
+      examStartTime,
+      mcqAnswers,
+      profile,
+      questionStatus,
+      selectedDepartment,
+      selectedSubject,
+      timeElapsed,
+      totalMarks,
+    ]
+  );
+
+  const openAnalyticsDraft = useCallback(() => {
+    if (profile?.role !== "student") {
+      setShowEndDialog(false);
+      navigate(appHomePath);
+      return;
+    }
+
+    const draft = buildAnalyticsDraftFromCurrentAttempt();
+    if (!draft) {
+      return;
+    }
+
+    saveExamAnalyticsDraft(draft);
+    setShowEndDialog(false);
+    localStorage.removeItem(progressStorageKey);
+    isExitingIntentionally.current = true;
+    if ('keyboard' in navigator && 'unlock' in (navigator as any).keyboard) {
+      (navigator as any).keyboard.unlock();
+    }
+
+    const goToAnalytics = () => {
+      navigate("/student/analytics", { state: { draft } });
+    };
+
+    if (document.fullscreenElement) {
+      document.exitFullscreen().then(goToAnalytics).catch(goToAnalytics);
+    } else {
+      goToAnalytics();
+    }
+  }, [appHomePath, buildAnalyticsDraftFromCurrentAttempt, navigate, profile?.role, progressStorageKey]);
 
   // Function to restart the exam (e.g. for retake flow)
   // @ts-ignore: kept for future retake flow usage
@@ -471,7 +636,8 @@ export default function ExamPracticePage() {
       streak,
       inlineCompilerOpen,
       inlineCompilerCode,
-      inlineCompilerLang
+      inlineCompilerLang,
+      analytics: analyticsRef.current ?? undefined,
     }));
   }, [answers, mcqAnswers, questionStatus, timeElapsed, examStartTime, examDurationMinutes, examSections, currentSectionIndex, currentQuestionIndex, selectedDepartment, selectedSubject, streak, inlineCompilerOpen, inlineCompilerCode, inlineCompilerLang, progressStorageKey]);
 
@@ -496,6 +662,16 @@ export default function ExamPracticePage() {
     if (!hasStarted || timeElapsed >= examDurationSeconds) return;
 
     const interval = setInterval(() => {
+      if (analyticsRef.current && currentQuestion && currentSection) {
+        syncExamAnalyticsSnapshot(
+          analyticsRef.current,
+          currentQuestion.id,
+          currentSection.id,
+          Date.now(),
+          document.hidden
+        );
+      }
+
       if (examStartTime) {
         const elapsed = Math.floor((Date.now() - new Date(examStartTime).getTime()) / 1000);
         const newTime = Math.min(examDurationSeconds, Math.max(0, elapsed));
@@ -504,11 +680,7 @@ export default function ExamPracticePage() {
           if (newTime % 60 === 0) saveNow();
           if (newTime >= examDurationSeconds) {
             saveNow();
-            if (profile?.role === "student" && requiresStrictExamMode) {
-              setPendingAutoSubmitDueToTimer(true);
-            } else {
-              setShowEndDialog(true);
-            }
+            setShowEndDialog(true);
             return examDurationSeconds;
           }
           return newTime;
@@ -519,11 +691,7 @@ export default function ExamPracticePage() {
           if (next % 60 === 0) saveNow();
           if (next >= examDurationSeconds) {
             saveNow();
-            if (profile?.role === "student" && requiresStrictExamMode) {
-              setPendingAutoSubmitDueToTimer(true);
-            } else {
-              setShowEndDialog(true);
-            }
+            setShowEndDialog(true);
             return examDurationSeconds;
           }
           return next;
@@ -532,10 +700,20 @@ export default function ExamPracticePage() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [hasStarted, timeElapsed, examStartTime, examDurationSeconds, saveNow, profile?.role, requiresStrictExamMode]);
+  }, [hasStarted, timeElapsed, examStartTime, examDurationSeconds, saveNow, currentQuestion, currentSection]);
 
   const updateAnswer = (questionId: string, content: string) => {
     if (answers[questionId] !== content) {
+      if (analyticsRef.current) {
+        recordTextAnswerChange(
+          analyticsRef.current,
+          questionId,
+          answers[questionId] || "",
+          content,
+          Date.now(),
+          document.hidden
+        );
+      }
       setAnswers((prev) => ({ ...prev, [questionId]: content }));
       if (!questionStatus[questionId] || questionStatus[questionId] !== 'answered') {
         setQuestionStatus((prev) => ({ ...prev, [questionId]: "answered" }));
@@ -551,6 +729,16 @@ export default function ExamPracticePage() {
   };
 
   const updateMcqAnswer = (questionId: string, optionId: string) => {
+    if (analyticsRef.current) {
+      recordMcqAnswerChange(
+        analyticsRef.current,
+        questionId,
+        mcqAnswers[questionId],
+        optionId,
+        Date.now(),
+        document.hidden
+      );
+    }
     setMcqAnswers((prev) => ({ ...prev, [questionId]: optionId }));
     if (!questionStatus[questionId] || questionStatus[questionId] !== 'answered') {
       setQuestionStatus((prev) => ({ ...prev, [questionId]: "answered" }));
@@ -581,6 +769,9 @@ export default function ExamPracticePage() {
 
   const markForReview = () => {
     if (currentQuestion) {
+      if (analyticsRef.current) {
+        recordReviewToggle(analyticsRef.current, currentQuestion.id, Date.now(), document.hidden);
+      }
       setQuestionStatus((prev) => ({
         ...prev,
         [currentQuestion.id]: prev[currentQuestion.id] === "marked" ? "unattempted" : "marked",
@@ -783,7 +974,7 @@ export default function ExamPracticePage() {
   };
 
   // Send exam to teacher for evaluation (optionally marked as auto-submitted due to violations)
-  const sendToTeacher = async (options?: { submittedDueToViolations?: boolean }) => {
+  const sendToTeacher = async (options?: { submittedDueToViolations?: boolean; redirectToAnalytics?: boolean }) => {
     if (!profile || !selectedSubject) return;
 
     // Find the subject and its teacher (use subject UUID for submissions and retake)
@@ -806,6 +997,10 @@ export default function ExamPracticePage() {
       return;
     }
 
+    const analyticsDraft = buildAnalyticsDraftFromCurrentAttempt({
+      submittedDueToViolations: options?.submittedDueToViolations,
+    });
+
     setIsSendingToTeacher(true);
     try {
       // Auto-evaluate MCQ answers before sending
@@ -820,7 +1015,7 @@ export default function ExamPracticePage() {
         }
       }
 
-      await createSubmission({
+      const submission = await createSubmission({
         studentId: profile.id,
         teacherId,
         subjectId: subjectIdUuid,
@@ -834,6 +1029,10 @@ export default function ExamPracticePage() {
         questionMarks: preCalculatedMarks,
         submittedDueToViolations: options?.submittedDueToViolations ?? false,
       });
+
+      if (analyticsDraft) {
+        upsertSubmissionAnalytics(analyticsDraft, submission.id).catch(() => {});
+      }
 
       if (subjectExamType === "main") {
         // One re-attempt per grant: revoke retake permission after they submit so another attempt requires a fresh teacher grant.
@@ -850,6 +1049,9 @@ export default function ExamPracticePage() {
       setSubmissionSent(true);
       setShowEndDialog(false);
       localStorage.removeItem(progressStorageKey);
+      if (options?.redirectToAnalytics) {
+        navigate(`/student/analytics/${submission.id}`);
+      }
     } catch {
       // silently ignore send-to-teacher failures
     } finally {
@@ -1051,6 +1253,7 @@ export default function ExamPracticePage() {
     markCurrentAsSkippedIfUnattempted();
 
     if (currentQuestionIndex < currentSection.questions.length - 1) {
+      nextNavigationKindRef.current = "next";
       setCurrentQuestionIndex(prev => prev + 1);
     } else if (currentSectionIndex < examSections.length - 1) {
       // Moving to next section - show celebration
@@ -1059,6 +1262,7 @@ export default function ExamPracticePage() {
       setShowSectionComplete(true);
       setTimeout(() => {
         setShowSectionComplete(false);
+        nextNavigationKindRef.current = "section";
         setCurrentSectionIndex(prev => prev + 1);
         setCurrentQuestionIndex(0);
       }, 2000);
@@ -1069,9 +1273,11 @@ export default function ExamPracticePage() {
   const goToPreviousQuestion = () => {
     markCurrentAsSkippedIfUnattempted();
     if (currentQuestionIndex > 0) {
+      nextNavigationKindRef.current = "previous";
       setCurrentQuestionIndex(prev => prev - 1);
     } else if (currentSectionIndex > 0) {
       const prevSection = examSections[currentSectionIndex - 1];
+      nextNavigationKindRef.current = "section";
       setCurrentSectionIndex(prev => prev - 1);
       setCurrentQuestionIndex(prevSection.questions.length - 1);
     }
@@ -1080,6 +1286,7 @@ export default function ExamPracticePage() {
   // Jump to specific question
   const jumpToQuestion = (sectionIdx: number, questionIdx: number) => {
     markCurrentAsSkippedIfUnattempted();
+    nextNavigationKindRef.current = "jump";
     setCurrentSectionIndex(sectionIdx);
     setCurrentQuestionIndex(questionIdx);
   };
@@ -1192,6 +1399,9 @@ export default function ExamPracticePage() {
     if (leaveCountdown !== -1 || !requiresStrictExamMode) return;
 
     const newCount = violationCount + 1;
+    if (analyticsRef.current) {
+      recordFullscreenExit(analyticsRef.current, Date.now());
+    }
     setViolationCount(newCount);
     if (selectedSubject && profile?.role === 'student' && selectedDepartment) {
       const dept = departments.find((d) => d.id === selectedDepartment);
@@ -1226,10 +1436,9 @@ export default function ExamPracticePage() {
   // When 3 violations reached: save and submit current answers to teacher, then navigate away
   useEffect(() => {
     if (!pendingAutoSubmitDueToViolations) return;
-    sendToTeacher({ submittedDueToViolations: true }).finally(() => {
+    sendToTeacher({ submittedDueToViolations: true, redirectToAnalytics: true }).finally(() => {
       setPendingAutoSubmitDueToViolations(false);
       localStorage.removeItem(progressStorageKey);
-      navigate('/');
     });
   }, [pendingAutoSubmitDueToViolations]);
 
@@ -1246,6 +1455,77 @@ export default function ExamPracticePage() {
       setPendingAutoSubmitDueToTimer(false);
     });
   }, [pendingAutoSubmitDueToTimer]);
+
+  useEffect(() => {
+    if (!hasStarted) return;
+
+    const handleVisibilityChange = () => {
+      if (!analyticsRef.current) return;
+      if (document.hidden) {
+        if (!focusTrackedRef.current) {
+          recordFocusLoss(analyticsRef.current, "visibility_hidden", Date.now());
+          focusTrackedRef.current = true;
+        }
+      } else {
+        if (focusTrackedRef.current) {
+          recordFocusGain(analyticsRef.current, "visibility_visible", Date.now());
+          focusTrackedRef.current = false;
+        }
+      }
+    };
+
+    const handleBlurTracking = () => {
+      if (!analyticsRef.current || focusTrackedRef.current) return;
+      recordFocusLoss(analyticsRef.current, "window_blur", Date.now());
+      focusTrackedRef.current = true;
+    };
+
+    const handleFocusTracking = () => {
+      if (!analyticsRef.current || !focusTrackedRef.current) return;
+      recordFocusGain(analyticsRef.current, "window_focus", Date.now());
+      focusTrackedRef.current = false;
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlurTracking);
+    window.addEventListener("focus", handleFocusTracking);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlurTracking);
+      window.removeEventListener("focus", handleFocusTracking);
+    };
+  }, [hasStarted]);
+
+  useEffect(() => {
+    if (!hasStarted) return;
+
+    const handleCopyTracking = () => analyticsRef.current && recordClipboardEvent(analyticsRef.current, "copy", Date.now(), document.hidden);
+    const handlePasteTracking = () => analyticsRef.current && recordClipboardEvent(analyticsRef.current, "paste", Date.now(), document.hidden);
+
+    document.addEventListener("copy", handleCopyTracking, true);
+    document.addEventListener("paste", handlePasteTracking, true);
+
+    return () => {
+      document.removeEventListener("copy", handleCopyTracking, true);
+      document.removeEventListener("paste", handlePasteTracking, true);
+    };
+  }, [hasStarted]);
+
+  useEffect(() => {
+    if (!hasStarted) return;
+
+    const handleTypingKeys = (event: KeyboardEvent) => {
+      if (!analyticsRef.current || !currentQuestion) return;
+      if (currentQuestion.type === "mcq") return;
+      if (event.key === "Backspace" || event.key === "Delete") {
+        recordBackspace(analyticsRef.current, Date.now(), document.hidden);
+      }
+    };
+
+    document.addEventListener("keydown", handleTypingKeys, true);
+    return () => document.removeEventListener("keydown", handleTypingKeys, true);
+  }, [hasStarted, currentQuestion]);
 
   // â”€â”€â”€ ANTI-CHEATING: Disable copy, cut, paste, and context menu â”€â”€â”€
   useEffect(() => {
@@ -1539,6 +1819,8 @@ export default function ExamPracticePage() {
                 setShowSubjectSelector(false);
                 setExamStartTime(examStartTimeFromTeacher ?? null);
                 setExamDurationMinutes(durationMinutesFromTeacher ?? 90);
+                ensureAnalyticsSnapshot(examStartTimeFromTeacher ?? new Date().toISOString());
+                nextNavigationKindRef.current = savedProgress ? "resume" : "start";
                 if (examStartTimeFromTeacher) {
                   const durationSec = (durationMinutesFromTeacher ?? 90) * 60;
                   const elapsed = Math.floor((Date.now() - new Date(examStartTimeFromTeacher).getTime()) / 1000);
@@ -1711,11 +1993,11 @@ export default function ExamPracticePage() {
                   <p>
                     {timeRemaining <= 0
                       ? requiresStrictExamMode
-                        ? "Your exam portal time has ended. Confirm to submit your answers to your teacher."
-                        : "Your prep exam time has ended. Choose how you want to finish and review it."
+                        ? "Your exam portal time has ended. Continue to analytics to review the attempt and submit it."
+                        : "Your prep exam time has ended. Continue to analytics to choose evaluation and review your attempt."
                       : requiresStrictExamMode
-                        ? "Are you sure you want to end the exam portal? Your answers will be submitted to your teacher."
-                        : "Are you sure you want to end this prep exam? You can evaluate it now or send it to your teacher."}
+                        ? "Are you sure you want to end the exam portal? We will lock the attempt and open its analytics page."
+                        : "Are you sure you want to end this prep exam? We will lock the attempt and open its analytics page."}
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="p-3 rounded-lg bg-black/5 text-center">
@@ -1737,51 +2019,14 @@ export default function ExamPracticePage() {
                 </AlertDialogCancel>
               )}
               {profile?.role === "student" ? (
-                requiresStrictExamMode ? (
-                  <button
-                    onClick={() => sendToTeacher()}
-                    disabled={isSendingToTeacher || isEvaluating}
-                    className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-[#071952] text-white hover:bg-[#071952]/80 transition-colors disabled:opacity-50 text-sm font-medium"
-                  >
-                    {isSendingToTeacher ? (
-                      <Loader2 size={16} className="mr-1.5 animate-spin" />
-                    ) : (
-                      <UserCheck size={16} className="mr-1.5" />
-                    )}
-                    Submit {EXAM_PORTAL_LABEL}
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => startEvaluation()}
-                      disabled={isSendingToTeacher || isEvaluating}
-                      className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-[#071952] text-white hover:bg-[#071952]/80 transition-colors disabled:opacity-50 text-sm font-medium"
-                    >
-                      <Sparkles size={16} className="mr-1.5" />
-                      Super Teacher
-                    </button>
-                    <button
-                      onClick={() => startAiThenTeacherEvaluation()}
-                      disabled={isSendingToTeacher || isEvaluating}
-                      className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-[#071952] text-white hover:bg-[#071952]/80 transition-colors disabled:opacity-50 text-sm font-medium"
-                    >
-                      <Sparkles size={16} className="mr-1.5" />
-                      Super Teacher + Teacher
-                    </button>
-                    <button
-                      onClick={() => sendToTeacher()}
-                      disabled={isSendingToTeacher || isEvaluating}
-                      className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-[#071952] text-white hover:bg-[#071952]/80 transition-colors disabled:opacity-50 text-sm font-medium"
-                    >
-                      {isSendingToTeacher ? (
-                        <Loader2 size={16} className="mr-1.5 animate-spin" />
-                      ) : (
-                        <UserCheck size={16} className="mr-1.5" />
-                      )}
-                      Submit to Teacher
-                    </button>
-                  </>
-                )
+                <button
+                  onClick={openAnalyticsDraft}
+                  disabled={isSendingToTeacher || isEvaluating}
+                  className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-[#071952] text-white hover:bg-[#071952]/80 transition-colors disabled:opacity-50 text-sm font-medium"
+                >
+                  <BarChart3 size={16} className="mr-1.5" />
+                  Continue to Analytics
+                </button>
               ) : (
                 <button
                   onClick={() => {
@@ -2391,6 +2636,7 @@ export default function ExamPracticePage() {
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => {
+                    nextNavigationKindRef.current = "section";
                     setCurrentSectionIndex(idx);
                     setCurrentQuestionIndex(0);
                   }}

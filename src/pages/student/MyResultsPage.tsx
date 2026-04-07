@@ -471,13 +471,22 @@ export default function MyResultsPage() {
 
                         {/* Re-download button */}
                         {!isPending && (
-                          <button
-                            onClick={() => handleRedownload(result)}
-                            className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border hover:bg-[#071952] hover:text-white transition-colors text-sm font-medium text-foreground"
-                          >
-                            <Download size={16} />
-                            Download Word Document
-                          </button>
+                          <div className="flex flex-wrap gap-3">
+                            <Link
+                              to={`/student/analytics/${result.id}`}
+                              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#071952] text-white hover:bg-[#071952]/85 transition-colors text-sm font-medium"
+                            >
+                              <Target size={16} />
+                              View Analytics
+                            </Link>
+                            <button
+                              onClick={() => handleRedownload(result)}
+                              className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border hover:bg-[#071952] hover:text-white transition-colors text-sm font-medium text-foreground"
+                            >
+                              <Download size={16} />
+                              Download Word Document
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}

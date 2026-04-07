@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
+  BarChart3,
   Settings,
   Gauge,
   X,
@@ -329,6 +330,17 @@ export default function Navbar() {
               >
                 <span className="nav-pill-icon"><ClipboardCheck className="w-4 h-4" /></span>
                 <span className="nav-pill-label">My Results</span>
+              </Link>
+            )}
+
+            {isAuthenticated && profile?.role === "student" && (
+              <Link
+                to="/student/analytics"
+                className={`nav-pill${location.pathname.startsWith('/student/analytics') ? ' nav-pill-active' : ''}`}
+                style={{ "--pill-color": "#7c3aed", "--pill-bg": "#f5f3ff", "--pill-shadow": "rgba(124,58,237,0.2)", "--pill-width": "118px" } as React.CSSProperties}
+              >
+                <span className="nav-pill-icon"><BarChart3 className="w-4 h-4" /></span>
+                <span className="nav-pill-label">Analytics</span>
               </Link>
             )}
 
@@ -788,6 +800,15 @@ export default function Navbar() {
                         >
                           <ClipboardCheck className="w-4 h-4 text-gray-400" />
                           My Results
+                        </button>
+                      )}
+                      {profile.role === "student" && (
+                        <button
+                          onClick={() => { setShowUserMenu(false); navigate("/student/analytics"); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium text-gray-700 hover:bg-[#071952]/5 hover:text-[#071952] rounded-xl transition-all duration-150"
+                        >
+                          <BarChart3 className="w-4 h-4 text-gray-400" />
+                          Analytics
                         </button>
                       )}
                       {profile.role === "student" && showStudentPractice && (

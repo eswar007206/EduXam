@@ -55,9 +55,20 @@ import type { SubmissionRow } from "@/lib/database.types";
 import type { EvaluationResult } from "@/services/evaluationService";
 
 type AnalyticsTab = "attempt" | "subject" | "profile";
+type LibraryLensTab = Exclude<AnalyticsTab, "attempt">;
 type AttemptViewMode = "focus" | "deep";
 type LibraryStatusFilter = "all" | "pending" | "evaluated";
 type PendingDemandPrompt = { mode: "ai" | "ai_teacher"; recentCount: number } | null;
+type AnalyticsLibraryState = {
+  activeTab: LibraryLensTab;
+  selectedSubjectId: string;
+  libraryStatusFilter: LibraryStatusFilter;
+  libraryPage: number;
+};
+type AnalyticsRouteState = {
+  draft?: ExamAnalyticsDraft;
+  libraryState?: AnalyticsLibraryState;
+};
 type ChartDatum = {
   label: string;
   value: number;
@@ -584,8 +595,18 @@ export default function ExamAnalyticsPage() {
   const [evalProgress, setEvalProgress] = useState<EvaluationProgress | null>(null);
   const [demandPrompt, setDemandPrompt] = useState<PendingDemandPrompt>(null);
   const primaryContentRef = useRef<HTMLDivElement | null>(null);
+  const isRestoringLibraryStateRef = useRef(false);
+  const lastLibraryStateRef = useRef<AnalyticsLibraryState>({
+    activeTab: "profile",
+    selectedSubjectId: "",
+    libraryStatusFilter: "all",
+    libraryPage: 0,
+  });
 
-  const routeDraft = (location.state as { draft?: ExamAnalyticsDraft } | null)?.draft ?? null;
+  const routeState = (location.state as AnalyticsRouteState | null) ?? null;
+  const routeDraft = routeState?.draft ?? null;
+  const routeLibraryState = routeState?.libraryState ?? null;
+  const isSavedAttemptRoute = Boolean(params.submissionId);
 
   const refreshData = useCallback(
     async (focusSubmissionId?: string | null) => {
@@ -666,8 +687,41 @@ export default function ExamAnalyticsPage() {
   }, [activeSubmission, draft, selectedSubjectId, submissions]);
 
   useEffect(() => {
+    if (isRestoringLibraryStateRef.current) {
+      isRestoringLibraryStateRef.current = false;
+      return;
+    }
     setLibraryPage(0);
   }, [activeTab, libraryStatusFilter, selectedSubjectId]);
+
+  useEffect(() => {
+    if (routeLibraryState) {
+      lastLibraryStateRef.current = routeLibraryState;
+    }
+  }, [routeLibraryState]);
+
+  useEffect(() => {
+    if (!isSavedAttemptRoute && activeTab !== "attempt") {
+      lastLibraryStateRef.current = {
+        activeTab,
+        selectedSubjectId,
+        libraryStatusFilter,
+        libraryPage,
+      };
+    }
+  }, [activeTab, isSavedAttemptRoute, libraryPage, libraryStatusFilter, selectedSubjectId]);
+
+  useEffect(() => {
+    if (!params.submissionId && !routeDraft && !draft) {
+      const lastLibraryState = lastLibraryStateRef.current;
+      isRestoringLibraryStateRef.current = true;
+      setActiveTab(lastLibraryState.activeTab);
+      setSelectedSubjectId(lastLibraryState.selectedSubjectId);
+      setLibraryStatusFilter(lastLibraryState.libraryStatusFilter);
+      setLibraryPage(lastLibraryState.libraryPage);
+      setAttemptViewMode("focus");
+    }
+  }, [draft, params.submissionId, routeDraft]);
 
   const attemptView = useMemo(
     () =>
@@ -878,6 +932,10 @@ export default function ExamAnalyticsPage() {
 
         await upsertSubmissionAnalytics(draft, submission.id);
 
+        if (draft.exam_type === "main" && draft.teacher_id) {
+          await revokeRetakePermission(draft.teacher_id, profile.id, draft.subject_id).catch(() => {});
+        }
+
         if (mode === "ai" && draft.subject_slug) {
           await saveTestResult(profile.id, draft.subject_slug, result.totalMarksObtained, result.totalMaxMarks).catch(() => {});
           await uploadAiArtifacts(draft, result);
@@ -966,15 +1024,29 @@ export default function ExamAnalyticsPage() {
       setActiveTab("attempt");
       setAttemptViewMode("focus");
 
+      const fallbackLibraryState = lastLibraryStateRef.current;
+      const nextLibraryState = {
+        activeTab: activeTab === "attempt" ? fallbackLibraryState.activeTab : activeTab,
+        selectedSubjectId:
+          activeTab === "attempt" ? fallbackLibraryState.selectedSubjectId : selectedSubjectId,
+        libraryStatusFilter,
+        libraryPage,
+      };
+      lastLibraryStateRef.current = nextLibraryState;
+
       if (params.submissionId === submissionId) {
         scrollToPrimaryContent();
         return;
       }
 
-      navigate(`/student/analytics/${submissionId}`);
+      navigate(`/student/analytics/${submissionId}`, {
+        state: {
+          libraryState: nextLibraryState,
+        } satisfies AnalyticsRouteState,
+      });
       scrollToPrimaryContent();
     },
-    [navigate, params.submissionId, scrollToPrimaryContent]
+    [activeTab, libraryPage, libraryStatusFilter, navigate, params.submissionId, scrollToPrimaryContent, selectedSubjectId]
   );
 
   useEffect(() => {
@@ -1034,6 +1106,8 @@ export default function ExamAnalyticsPage() {
       setLibraryPage(Math.max(0, totalLibraryPages - 1));
     }
   }, [libraryPage, totalLibraryPages]);
+
+  const showAttemptAnalytics = activeTab === "attempt" || isSavedAttemptRoute;
 
   const attemptQuestionStatusData = useMemo<ChartDatum[]>(
     () => [
@@ -1225,23 +1299,28 @@ export default function ExamAnalyticsPage() {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-sky-800">
                 <Sparkles className="h-3.5 w-3.5" />
-                Deep Exam Analytics
+                {isSavedAttemptRoute ? "Saved Attempt Analytics" : "Deep Exam Analytics"}
               </div>
               <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-                {draft ? "Attempt intelligence before evaluation" : "Attempt, subject, and profile intelligence"}
+                {isSavedAttemptRoute
+                  ? activeSubmission?.subject_name ?? "Focused attempt intelligence"
+                  : draft
+                  ? "Attempt intelligence before evaluation"
+                  : "Attempt, subject, and profile intelligence"}
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
-                Review time on each question, navigation jumps, focus loss, typing speed, section pacing,
-                and score efficiency from one analytics workspace.
+                {isSavedAttemptRoute
+                  ? "This page stays locked to the saved attempt you opened, so the view stays clean. Use the browser back button or the library button below to return."
+                  : "Review time on each question, navigation jumps, focus loss, typing speed, section pacing, and score efficiency from one analytics workspace."}
               </p>
 
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link
-                  to={studentExamEntryPath}
+                  to={isSavedAttemptRoute ? "/student/analytics" : studentExamEntryPath}
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-[#071952]/30 hover:text-[#071952]"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  {studentExamEntryLabel}
+                  {isSavedAttemptRoute ? "Back to Analytics Library" : studentExamEntryLabel}
                 </Link>
                 <Link
                   to="/my-results"
@@ -1254,73 +1333,96 @@ export default function ExamAnalyticsPage() {
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-white/85 p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Current Lens</p>
-              <div className="mt-4 flex flex-wrap gap-2 rounded-full bg-slate-100 p-1">
-                <SegmentButton
-                  active={activeTab === "attempt"}
-                  label="Attempt"
-                  onClick={() => {
-                    setActiveTab("attempt");
-                    scrollToPrimaryContent();
-                  }}
-                />
-                <SegmentButton
-                  active={activeTab === "subject"}
-                  label="Subject"
-                  onClick={() => {
-                    setActiveTab("subject");
-                    scrollToPrimaryContent();
-                  }}
-                />
-                <SegmentButton
-                  active={activeTab === "profile"}
-                  label="Profile"
-                  onClick={() => {
-                    setActiveTab("profile");
-                    scrollToPrimaryContent();
-                  }}
-                />
-              </div>
-
-              <div className="mt-5 rounded-2xl bg-slate-50 p-4">
-                <p className="text-sm font-semibold text-slate-900">
-                  {activeTab === "attempt"
-                    ? draft?.subject_name ?? activeSubmission?.subject_name ?? "Attempt analytics"
-                    : activeTab === "subject"
-                    ? subjectView?.subjectName ?? "Subject analytics"
-                    : "Profile analytics"}
-                </p>
-                <p className="mt-2 text-sm text-slate-500">
-                  {activeTab === "attempt"
-                    ? "See what happened during this exact attempt, before and after evaluation."
-                    : activeTab === "subject"
-                    ? "Track momentum, question hotspots, and section pacing across the subject."
-                    : "Spot your strongest subjects, improvement trend, and consistency across exams."}
-                </p>
-
-                {activeTab !== "profile" && availableSubjects.length > 0 && (
-                  <div className="mt-4">
-                    <label className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
-                      Subject Filter
-                    </label>
-                    <select
-                      value={selectedSubjectId}
-                      onChange={(event) => {
-                        setSelectedSubjectId(event.target.value);
+              {isSavedAttemptRoute ? (
+                <>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Opened Attempt</p>
+                  <div className="mt-5 rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {activeSubmission?.subject_name ?? "Saved attempt"}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-500">
+                      This view only shows the single saved attempt you opened from the library.
+                    </p>
+                    {activeSubmission && (
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <SubmissionStatusPill status={activeSubmission.status} />
+                        <span className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          {formatShortDate(activeSubmission.created_at)} -{" "}
+                          {activeSubmission.exam_type === "main" ? EXAM_PORTAL_LABEL : "Prep Exam"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Current Lens</p>
+                  <div className="mt-4 flex flex-wrap gap-2 rounded-full bg-slate-100 p-1">
+                    <SegmentButton
+                      active={activeTab === "subject"}
+                      label="Subject"
+                      onClick={() => {
                         setActiveTab("subject");
                         scrollToPrimaryContent();
                       }}
-                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-[#071952]"
-                    >
-                      {availableSubjects.map((subject) => (
-                        <option key={subject.id} value={subject.id}>
-                          {subject.name}
-                        </option>
-                      ))}
-                    </select>
+                    />
+                    <SegmentButton
+                      active={activeTab === "profile"}
+                      label="Profile"
+                      onClick={() => {
+                        setActiveTab("profile");
+                        scrollToPrimaryContent();
+                      }}
+                    />
                   </div>
-                )}
-              </div>
+
+                  <div className="mt-5 rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {activeTab === "attempt"
+                        ? draft?.subject_name ?? activeSubmission?.subject_name ?? "Attempt analytics"
+                        : activeTab === "subject"
+                        ? subjectView?.subjectName ?? "Subject analytics"
+                        : "Profile analytics"}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-500">
+                      {activeTab === "attempt"
+                        ? "See what happened during this exact attempt, before and after evaluation."
+                        : activeTab === "subject"
+                        ? "Track momentum, question hotspots, and section pacing across the subject."
+                        : "Spot your strongest subjects, improvement trend, and consistency across exams."}
+                    </p>
+
+                    {activeTab === "attempt" && (
+                      <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                        This page is focused on the currently opened attempt. Use `Subject` or `Profile` above to switch lens.
+                      </div>
+                    )}
+
+                    {activeTab === "subject" && availableSubjects.length > 0 && (
+                      <div className="mt-4">
+                        <label className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+                          Subject Filter
+                        </label>
+                        <select
+                          value={selectedSubjectId}
+                          onChange={(event) => {
+                            setSelectedSubjectId(event.target.value);
+                            setActiveTab("subject");
+                            scrollToPrimaryContent();
+                          }}
+                          className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-[#071952]"
+                        >
+                          {availableSubjects.map((subject) => (
+                            <option key={subject.id} value={subject.id}>
+                              {subject.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </motion.section>
@@ -1335,7 +1437,7 @@ export default function ExamAnalyticsPage() {
           <>
             <div ref={primaryContentRef} className="scroll-mt-32" />
 
-            {activeTab === "attempt" && (
+            {showAttemptAnalytics && (
               <>
                 <section className="mt-8 rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -1728,7 +1830,7 @@ export default function ExamAnalyticsPage() {
               </>
             )}
 
-            {activeTab === "subject" && subjectView && (
+            {!isSavedAttemptRoute && activeTab === "subject" && subjectView && (
               <>
                 <section className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <StatCard label="Attempts" value={String(subjectView.attemptCount)} hint={`${subjectView.evaluatedAttemptCount} evaluated`} icon={BookOpen} />
@@ -1846,7 +1948,7 @@ export default function ExamAnalyticsPage() {
               </>
             )}
 
-            {activeTab === "profile" && (
+            {!isSavedAttemptRoute && activeTab === "profile" && (
               <>
                 <section className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <StatCard label="Total Attempts" value={String(profileView.attemptCount)} hint={`${profileView.pendingAttemptCount} pending`} icon={Layers3} />
@@ -1991,7 +2093,8 @@ export default function ExamAnalyticsPage() {
               </>
             )}
 
-            <section className="mt-8 rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+            {!isSavedAttemptRoute && (
+              <section className="mt-8 rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
                 <div>
                   <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
@@ -2000,7 +2103,7 @@ export default function ExamAnalyticsPage() {
                   </div>
                   <h2 className="mt-3 text-2xl font-bold text-slate-900">Analytics library for every saved attempt</h2>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-                    The library is now a compact navigator instead of a giant wall of cards. Open an attempt to swap the main panel above without losing your place.
+                    Open any saved attempt in a clean detail view. When you go back, the analytics library returns exactly to this workspace instead of staying stuck on the attempt.
                   </p>
                 </div>
 
@@ -2108,7 +2211,8 @@ export default function ExamAnalyticsPage() {
                   </div>
                 )}
               </div>
-            </section>
+              </section>
+            )}
           </>
         )}
       </div>

@@ -19,7 +19,7 @@ import { EXAM_PORTAL_LABEL } from "@/lib/portalLabels";
 interface StartExamModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onStart: (examStartTime?: string | null, durationMinutes?: number) => void;
+  onStart: (examStartTime?: string | null, durationMinutes?: number) => Promise<boolean> | boolean;
   onCancel: () => void;
   totalMarks: number;
   subjectSlug?: string | null;
@@ -60,6 +60,8 @@ export function StartExamModal({
   const [nextSlot, setNextSlot] = useState<MainExamScheduleSlotRow | null>(null);
   const [hasAssignedSlot, setHasAssignedSlot] = useState(false);
   const [rulesAcknowledged, setRulesAcknowledged] = useState(false);
+  const [startLoading, setStartLoading] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !isStudent || !subjectUuid || !isMainExam) {
@@ -73,6 +75,8 @@ export function StartExamModal({
       setNextSlot(null);
       setHasAssignedSlot(false);
       setRulesAcknowledged(false);
+      setStartLoading(false);
+      setStartError(null);
       return;
     }
 
@@ -88,6 +92,8 @@ export function StartExamModal({
     setNextSlot(null);
     setHasAssignedSlot(false);
     setRulesAcknowledged(false);
+    setStartLoading(false);
+    setStartError(null);
 
     getStudentMainExamAccess(subjectUuid, studentEmail ?? "")
       .then((access) => {
@@ -145,6 +151,32 @@ export function StartExamModal({
     ((!isStudent || !isMainExam || examStarted) && !alreadyAttempted && (!requiresRulesAcknowledgement || rulesAcknowledged));
   const showWaitMessage = isStudent && isMainExam && !controlLoading && !examStarted;
   const showAlreadyAttempted = isStudent && isMainExam && !attemptCheckLoading && alreadyAttempted;
+
+  const handleStartClick = async () => {
+    if (!canStart || controlLoading || attemptCheckLoading || startLoading) return;
+
+    setStartError(null);
+    setStartLoading(true);
+
+    try {
+      const started = await onStart(examStartTime, durationMinutes);
+      if (started === false) {
+        setStartError(
+          strictModeSupported && isMainExam
+            ? `Fullscreen access was blocked. Allow fullscreen to start the ${EXAM_PORTAL_LABEL.toLowerCase()} with strict protection.`
+            : "We could not start the exam. Please try again."
+        );
+      }
+    } catch {
+      setStartError(
+        strictModeSupported && isMainExam
+          ? `Fullscreen access was blocked. Allow fullscreen to start the ${EXAM_PORTAL_LABEL.toLowerCase()} with strict protection.`
+          : "We could not start the exam. Please try again."
+      );
+    } finally {
+      setStartLoading(false);
+    }
+  };
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -311,6 +343,12 @@ export function StartExamModal({
                   </div>
                 </div>
               )}
+
+              {startError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                  {startError}
+                </div>
+              )}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -322,11 +360,15 @@ export function StartExamModal({
             Choose Different Subject
           </AlertDialogCancel>
           <button
-            onClick={canStart ? () => onStart(examStartTime, durationMinutes) : undefined}
-            disabled={!canStart || controlLoading || attemptCheckLoading}
+            onClick={handleStartClick}
+            disabled={!canStart || controlLoading || attemptCheckLoading || startLoading}
             className="bg-black px-4 py-2 rounded-md hover:bg-black/90 text-white hover:scale-105 hover:shadow-xl hover:shadow-[#1e3a8a]/50 transition-all duration-300 ease-out group font-medium inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
-            <Zap size={18} className="mr-2 group-hover:rotate-12 group-hover:scale-110 transition-transform duration-300" />
+            {startLoading ? (
+              <Loader2 size={18} className="mr-2 animate-spin" />
+            ) : (
+              <Zap size={18} className="mr-2 group-hover:rotate-12 group-hover:scale-110 transition-transform duration-300" />
+            )}
             {isMainExam ? `Start ${EXAM_PORTAL_LABEL}` : "Start Prep Exam"}
           </button>
         </AlertDialogFooter>

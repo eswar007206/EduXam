@@ -26,6 +26,10 @@ import {
   Clock,
   AlertTriangle,
   BarChart3,
+  Brain,
+  Cpu,
+  Gauge,
+  UserCheck,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import HeroBg from "@/assets/vecteezy_abstract-boxes-background-modern-technology-with-square_8171873.jpg";
@@ -51,8 +55,10 @@ import { saveTestResult, getStudentProgress, type SubjectProgress } from "@/serv
 import { createSubmission, getRecentSubmissionCount } from "@/services/submissionService";
 import { sendParentNotification } from "@/services/emailService";
 import { reportExamViolation } from "@/services/examViolationService";
+import { revokeRetakePermission } from "@/services/examRetakeService";
 import {
   clearExamAnalyticsDraft,
+  buildAttemptAnalyticsViewModel,
   createExamAnalyticsSnapshot,
   finalizeExamAnalyticsDraft,
   recordBackspace,
@@ -64,8 +70,8 @@ import {
   recordQuestionEntry,
   recordReviewToggle,
   recordTextAnswerChange,
-  saveExamAnalyticsDraft,
   syncExamAnalyticsSnapshot,
+  type ExamAnalyticsDraft,
   type ExamAnalyticsSnapshot,
   type NavigationKind,
   upsertSubmissionAnalytics,
@@ -100,6 +106,21 @@ function getColorValue(colorClass: string): string {
   };
   const result = colorMap[colorClass];
   return result || '#000000';
+}
+
+function formatAnalyticsDuration(seconds: number | null | undefined): string {
+  if (!seconds || seconds <= 0) return "0m";
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  if (hrs > 0) return `${hrs}h ${mins}m`;
+  if (mins > 0) return `${mins}m ${secs}s`;
+  return `${secs}s`;
+}
+
+function formatAnalyticsPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "Pending";
+  return `${value.toFixed(1)}%`;
 }
 
 // Motivational messages that appear during the exam
@@ -327,6 +348,7 @@ export default function ExamPracticePage() {
   const [showHighDemandWarning, setShowHighDemandWarning] = useState(false);
   const [highDemandCount, setHighDemandCount] = useState(0);
   const [pendingEvalType, setPendingEvalType] = useState<'ai' | 'ai_teacher'>('ai');
+  const [endedAttemptDraft, setEndedAttemptDraft] = useState<ExamAnalyticsDraft | null>(null);
 
   // Teacher submission state
   const [isSendingToTeacher, setIsSendingToTeacher] = useState(false);
@@ -364,6 +386,10 @@ export default function ExamPracticePage() {
       ?.subjects.find((subject) => subject.id === selectedSubject) ?? null;
   }, [visibleDepartments, selectedDepartment, selectedSubject]);
   const currentExamType = selectedSubjectMeta?.examType ?? "main";
+  const endedAttemptView = useMemo(
+    () => (endedAttemptDraft ? buildAttemptAnalyticsViewModel({ draft: endedAttemptDraft }) : null),
+    [endedAttemptDraft]
+  );
   const isStudentMainExam = currentExamType === "main" && profile?.role === "student";
   const browserSupportsStrictExamMode =
     typeof document !== "undefined" &&
@@ -396,6 +422,7 @@ export default function ExamPracticePage() {
       setSelectedSubject(null);
       setShowSubjectSelector(true);
       setHasStarted(false);
+      setEndedAttemptDraft(null);
       analyticsRef.current = null;
       clearExamAnalyticsDraft();
       localStorage.removeItem(progressStorageKey);
@@ -462,12 +489,17 @@ export default function ExamPracticePage() {
     // Check if resuming existing session for same subject
     if (savedProgress?.selectedSubject === subjectId) {
       // Show start dialog for resume as well (keep state preserved)
+      isExitingIntentionally.current = false;
+      setStrictModeSupported(browserSupportsStrictExamMode);
       nextNavigationKindRef.current = "resume";
       setShowStartDialog(true);
       return;
     }
 
     clearExamAnalyticsDraft();
+    isExitingIntentionally.current = false;
+    setStrictModeSupported(browserSupportsStrictExamMode);
+    setEndedAttemptDraft(null);
     setSelectedDepartment(departmentId);
     setSelectedSubject(subjectId);
     const department = departments.find(d => d.id === departmentId);
@@ -559,22 +591,34 @@ export default function ExamPracticePage() {
       return;
     }
 
-    saveExamAnalyticsDraft(draft);
+    setEndedAttemptDraft(draft);
+    setHasStarted(false);
     setShowEndDialog(false);
+    setShowLeaveWarning(false);
+    setLeaveCountdown(null);
+    if (leaveCountdownRef.current) {
+      clearInterval(leaveCountdownRef.current);
+      leaveCountdownRef.current = null;
+    }
     localStorage.removeItem(progressStorageKey);
     isExitingIntentionally.current = true;
     if ('keyboard' in navigator && 'unlock' in (navigator as any).keyboard) {
       (navigator as any).keyboard.unlock();
     }
 
-    const goToAnalytics = () => {
-      navigate("/student/analytics", { state: { draft } });
-    };
-
     if (document.fullscreenElement) {
-      document.exitFullscreen().then(goToAnalytics).catch(goToAnalytics);
+      document.exitFullscreen()
+        .then(() => {
+          setIsFullScreen(false);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        })
+        .catch(() => {
+          setIsFullScreen(false);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
     } else {
-      goToAnalytics();
+      setIsFullScreen(false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }, [appHomePath, buildAnalyticsDraftFromCurrentAttempt, navigate, profile?.role, progressStorageKey]);
 
@@ -600,6 +644,7 @@ export default function ExamPracticePage() {
   // Function to handle exam end
   const endExam = () => {
     isExitingIntentionally.current = true;
+    setEndedAttemptDraft(null);
     saveNow();
     localStorage.removeItem(progressStorageKey);
     if ('keyboard' in navigator && 'unlock' in (navigator as any).keyboard) {
@@ -830,8 +875,6 @@ export default function ExamPracticePage() {
 
   // Start evaluation process (self-eval) â€” checks demand first
   const startEvaluation = async (skipDemandCheck = false) => {
-    if (currentExamType === "main") return;
-
     // Check high demand before starting evaluation
     if (!skipDemandCheck && selectedSubject) {
       try {
@@ -892,23 +935,39 @@ export default function ExamPracticePage() {
           qMarks[qe.questionId] = qe.marksAwarded;
         }
 
-        createSubmission({
-          studentId: profile.id,
-          teacherId: aiTeacherId,
-          subjectId: aiSubjectUuid || selectedSubject,
-          subjectName,
-          examType: aiExamType,
-          examSections,
-          answers,
-          mcqAnswers,
-          totalMarks,
-          timeElapsed,
-          questionMarks: qMarks,
-          totalMarksObtained: result.totalMarksObtained,
-          evaluationType: 'ai',
-          evaluationData: result,
-          feedback: result.overallFeedback,
-        }).catch(() => {});
+        const analyticsDraft = buildAnalyticsDraftFromCurrentAttempt();
+
+        (async () => {
+          try {
+            const submission = await createSubmission({
+              studentId: profile.id,
+              teacherId: aiTeacherId,
+              subjectId: aiSubjectUuid || selectedSubject,
+              subjectName,
+              examType: aiExamType,
+              examSections,
+              answers,
+              mcqAnswers,
+              totalMarks,
+              timeElapsed,
+              questionMarks: qMarks,
+              totalMarksObtained: result.totalMarksObtained,
+              evaluationType: 'ai',
+              evaluationData: result,
+              feedback: result.overallFeedback,
+            });
+
+            if (analyticsDraft) {
+              await upsertSubmissionAnalytics(analyticsDraft, submission.id).catch(() => {});
+            }
+
+            if (aiExamType === "main" && aiTeacherId && aiSubjectUuid) {
+              await revokeRetakePermission(aiTeacherId, profile.id, aiSubjectUuid).catch(() => {});
+            }
+          } catch {
+            // persistence is best-effort so the result modal is not blocked
+          }
+        })();
 
         // Upload result to Supabase storage (cloud backup - always)
         (async () => {
@@ -1042,7 +1101,6 @@ export default function ExamPracticePage() {
 
       if (subjectExamType === "main") {
         // One re-attempt per grant: revoke retake permission after they submit so another attempt requires a fresh teacher grant.
-        const { revokeRetakePermission } = await import("@/services/examRetakeService");
         await revokeRetakePermission(teacherId, profile.id, subjectIdUuid).catch(() => {});
       }
 
@@ -1068,7 +1126,6 @@ export default function ExamPracticePage() {
   // AI + Teacher: AI evaluates first, then sends to teacher for review
   const startAiThenTeacherEvaluation = async (skipDemandCheck = false) => {
     if (!profile || !selectedSubject) return;
-    if (currentExamType === "main") return;
 
     // Check high demand before starting evaluation
     if (!skipDemandCheck) {
@@ -1125,7 +1182,7 @@ export default function ExamPracticePage() {
       }
 
       // Step 3: Create submission as pending ai_teacher
-      await createSubmission({
+      const submission = await createSubmission({
         studentId: profile.id,
         teacherId,
         subjectId: subjectIdUuid,
@@ -1142,6 +1199,15 @@ export default function ExamPracticePage() {
         evaluationData: result,
         feedback: result.overallFeedback,
       });
+
+      const analyticsDraft = buildAnalyticsDraftFromCurrentAttempt();
+      if (analyticsDraft) {
+        await upsertSubmissionAnalytics(analyticsDraft, submission.id).catch(() => {});
+      }
+
+      if (subjectExamType === "main") {
+        await revokeRetakePermission(teacherId, profile.id, subjectIdUuid).catch(() => {});
+      }
 
       // Step 4: Show success
       setSubmissionSentTitle("Super Teacher Evaluated & Sent to Teacher");
@@ -1165,7 +1231,6 @@ export default function ExamPracticePage() {
   // Save exam for later evaluation (when high demand detected)
   const saveForLaterEvaluation = async () => {
     if (!profile || !selectedSubject) return;
-    if (currentExamType === "main") return;
 
     let teacherId: string | undefined;
     let subjectName = "Exam";
@@ -1195,7 +1260,7 @@ export default function ExamPracticePage() {
     }
 
     try {
-      await createSubmission({
+      const submission = await createSubmission({
         studentId: profile.id,
         teacherId: pendingEvalType === 'ai_teacher' ? (teacherId || null) : null,
         subjectId: subjectIdUuid || selectedSubject,
@@ -1209,6 +1274,15 @@ export default function ExamPracticePage() {
         questionMarks: preCalculatedMarks,
         evaluationType: pendingEvalType,
       });
+
+      const analyticsDraft = buildAnalyticsDraftFromCurrentAttempt();
+      if (analyticsDraft) {
+        await upsertSubmissionAnalytics(analyticsDraft, submission.id).catch(() => {});
+      }
+
+      if (subjectExamType === "main" && teacherId && subjectIdUuid) {
+        await revokeRetakePermission(teacherId, profile.id, subjectIdUuid).catch(() => {});
+      }
 
       setShowHighDemandWarning(false);
       setSubmissionSentTitle("Exam Saved Successfully");
@@ -1318,14 +1392,14 @@ export default function ExamPracticePage() {
   }, [selectedSubject, savedProgress]);
 
   // â”€â”€â”€ ANTI-CHEATING: Helper to enter fullscreen and lock Escape/F11 etc. â”€â”€â”€
-  const enterFullscreenWithLock = (): Promise<void> => {
+  const enterFullscreenWithLock = (): Promise<boolean> => {
     const requestFullscreen = document.documentElement.requestFullscreen?.bind(document.documentElement);
     if (!requestFullscreen) {
       setStrictModeSupported(false);
       setIsFullScreen(false);
       setShowLeaveWarning(false);
       setLeaveCountdown(null);
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
 
     const applyKeyboardLock = () => {
@@ -1340,21 +1414,18 @@ export default function ExamPracticePage() {
       .catch(() => requestFullscreen())
       .then(() => {
         if (!document.fullscreenElement) {
-          setStrictModeSupported(false);
           setIsFullScreen(false);
-          setShowLeaveWarning(false);
-          setLeaveCountdown(null);
-          return;
+          return false;
         }
 
+        setStrictModeSupported(true);
         setIsFullScreen(true);
         applyKeyboardLock();
+        return true;
       })
       .catch(() => {
-        setStrictModeSupported(false);
         setIsFullScreen(false);
-        setShowLeaveWarning(false);
-        setLeaveCountdown(null);
+        return false;
       });
   };
 
@@ -1716,16 +1787,17 @@ export default function ExamPracticePage() {
 
   // Handler for confirming leave / returning to exam
   const handleReturnToExam = () => {
-    if (leaveCountdownRef.current) {
-      clearInterval(leaveCountdownRef.current);
-      leaveCountdownRef.current = null;
-    }
-    setLeaveCountdown(null);
-    enterFullscreenWithLock().then(() => {
+    enterFullscreenWithLock().then((restored) => {
+      if (!restored) return;
+
+      isExitingIntentionally.current = false;
+      if (leaveCountdownRef.current) {
+        clearInterval(leaveCountdownRef.current);
+        leaveCountdownRef.current = null;
+      }
+      setLeaveCountdown(null);
       setShowLeaveWarning(false);
-    }).catch(() => {
-      setShowLeaveWarning(false);
-    });
+    }).catch(() => {});
   };
 
   const handleConfirmLeave = () => {
@@ -1849,9 +1921,26 @@ export default function ExamPracticePage() {
               onOpenChange={(open) => {
                 setShowStartDialog(open);
               }}
-              onStart={(examStartTimeFromTeacher, durationMinutesFromTeacher) => {
+              onStart={async (examStartTimeFromTeacher, durationMinutesFromTeacher) => {
+                const shouldUseStrictMode =
+                  profile?.role === "student" &&
+                  (selectedSubjectMeta?.examType ?? "main") === "main" &&
+                  browserSupportsStrictExamMode;
+
+                if (shouldUseStrictMode) {
+                  const strictModeReady = await enterFullscreenWithLock();
+                  if (!strictModeReady) {
+                    return false;
+                  }
+                } else {
+                  setIsFullScreen(false);
+                  setStrictModeSupported(browserSupportsStrictExamMode);
+                }
+
+                isExitingIntentionally.current = false;
                 setShowStartDialog(false);
                 setShowSubjectSelector(false);
+                setEndedAttemptDraft(null);
                 setExamStartTime(examStartTimeFromTeacher ?? null);
                 setExamDurationMinutes(durationMinutesFromTeacher ?? 90);
                 ensureAnalyticsSnapshot(examStartTimeFromTeacher ?? new Date().toISOString());
@@ -1862,14 +1951,7 @@ export default function ExamPracticePage() {
                   setTimeElapsed(Math.min(durationSec, Math.max(0, elapsed)));
                 }
                 setHasStarted(true);
-                if (requiresStrictExamMode) {
-                  // Request fullscreen after exam view has rendered.
-                  requestAnimationFrame(() => {
-                    enterFullscreenWithLock().catch(() => {});
-                  });
-                } else {
-                  setIsFullScreen(false);
-                }
+                return true;
               }}
               onCancel={() => setShowStartDialog(false)}
               totalMarks={totalMarks}
@@ -2037,11 +2119,11 @@ export default function ExamPracticePage() {
                   <p>
                     {timeRemaining <= 0
                       ? currentExamType === "main"
-                        ? "Your exam portal time has ended. Continue to analytics to review the attempt and submit it."
-                        : "Your prep exam time has ended. Continue to analytics to choose evaluation and review your attempt."
+                        ? "Your exam portal time has ended. We will lock the attempt and show this attempt's analytics on the same screen."
+                        : "Your prep exam time has ended. We will lock the attempt and show this attempt's analytics on the same screen."
                       : currentExamType === "main"
-                        ? "Are you sure you want to end the exam portal? We will lock the attempt and open its analytics page."
-                        : "Are you sure you want to end this prep exam? We will lock the attempt and open its analytics page."}
+                        ? "Are you sure you want to end the exam portal? We will lock the attempt and show only this attempt's analytics here."
+                        : "Are you sure you want to end this prep exam? We will lock the attempt and show only this attempt's analytics here."}
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="p-3 rounded-lg bg-black/5 text-center">
@@ -2059,7 +2141,7 @@ export default function ExamPracticePage() {
             <AlertDialogFooter className="!flex-row flex-wrap justify-end gap-2 !space-x-0 mt-2">
               {timeRemaining > 0 && (
                 <AlertDialogCancel className="mt-0">
-                  Cancel
+                  Close
                 </AlertDialogCancel>
               )}
               {profile?.role === "student" ? (
@@ -2069,7 +2151,7 @@ export default function ExamPracticePage() {
                   className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-[#071952] text-white hover:bg-[#071952]/80 transition-colors disabled:opacity-50 text-sm font-medium"
                 >
                   <BarChart3 size={16} className="mr-1.5" />
-                  Continue to Analytics
+                  End Exam + Analytics
                 </button>
               ) : (
                 <button
@@ -2574,6 +2656,156 @@ export default function ExamPracticePage() {
                 </div>
               </div>
             </motion.div>
+          </div>
+        )}
+
+        {!hasStarted && endedAttemptDraft && endedAttemptView && (
+          <div className="space-y-6">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-3xl border border-border bg-card p-6 shadow-sm"
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+                    <BarChart3 className="h-3.5 w-3.5" />
+                    Current Attempt Analytics
+                  </div>
+                  <h2 className="mt-3 text-2xl font-bold text-foreground">{endedAttemptDraft.subject_name}</h2>
+                  <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+                    This is the analytics for the exam you just finished. Choose one evaluation route below, then review the current-attempt insights underneath.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-border bg-accent/40 px-4 py-3 text-sm text-muted-foreground">
+                  <p className="font-semibold text-foreground">{endedAttemptDraft.exam_type === "main" ? EXAM_PORTAL_LABEL : "Prep Exam"}</p>
+                  <p className="mt-1">Attempt locked on this screen</p>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-3 md:grid-cols-3">
+                <button
+                  onClick={() => startEvaluation()}
+                  disabled={isEvaluating || isSendingToTeacher}
+                  className="flex items-center justify-center gap-2 rounded-2xl bg-[#071952] px-4 py-4 text-sm font-semibold text-white transition hover:bg-[#071952]/90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Cpu className="h-4 w-4" />
+                  Super Teacher
+                </button>
+                <button
+                  onClick={() => startAiThenTeacherEvaluation()}
+                  disabled={isEvaluating || isSendingToTeacher}
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-card px-4 py-4 text-sm font-semibold text-foreground transition hover:border-[#071952]/20 hover:text-[#071952] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Brain className="h-4 w-4" />
+                  Super Teacher + Teacher
+                </button>
+                <button
+                  onClick={() => sendToTeacher()}
+                  disabled={isEvaluating || isSendingToTeacher}
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-card px-4 py-4 text-sm font-semibold text-foreground transition hover:border-[#071952]/20 hover:text-[#071952] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <UserCheck className="h-4 w-4" />
+                  Teacher
+                </button>
+              </div>
+            </motion.div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-border bg-card p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Questions</p>
+                <p className="mt-3 text-3xl font-bold text-foreground">
+                  {endedAttemptView.answeredQuestions}/{endedAttemptView.totalQuestions}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">Answered in this attempt</p>
+              </div>
+              <div className="rounded-2xl border border-border bg-card p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Duration</p>
+                <p className="mt-3 text-3xl font-bold text-foreground">{formatAnalyticsDuration(endedAttemptView.totalDurationSeconds)}</p>
+                <p className="mt-1 text-sm text-muted-foreground">Total time spent</p>
+              </div>
+              <div className="rounded-2xl border border-border bg-card p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Active Focus</p>
+                <p className="mt-3 text-3xl font-bold text-foreground">{formatAnalyticsPercent(endedAttemptView.activeRatio)}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{formatAnalyticsDuration(endedAttemptView.activeDurationSeconds)} active work</p>
+              </div>
+              <div className="rounded-2xl border border-border bg-card p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Typing Speed</p>
+                <p className="mt-3 text-3xl font-bold text-foreground">{endedAttemptView.typingWpm.toFixed(1)} WPM</p>
+                <p className="mt-1 text-sm text-muted-foreground">{endedAttemptView.totalWordsTyped} words typed</p>
+              </div>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Section Analytics</p>
+                    <h3 className="mt-2 text-xl font-bold text-foreground">Time and completion by section</h3>
+                  </div>
+                  <Gauge className="h-5 w-5 text-primary" />
+                </div>
+                <div className="mt-5 space-y-3">
+                  {endedAttemptView.sections.map((section) => (
+                    <div key={section.sectionId} className="rounded-2xl bg-accent/30 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{section.sectionName}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {section.answeredCount}/{section.questionCount} answered
+                          </p>
+                        </div>
+                        <div className="text-right text-sm">
+                          <p className="font-semibold text-foreground">{formatAnalyticsDuration(section.timeSpentSeconds)}</p>
+                          <p className="text-muted-foreground">{formatAnalyticsPercent(section.scorePercentage)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Attempt Summary</p>
+                <h3 className="mt-2 text-xl font-bold text-foreground">What happened in this attempt</h3>
+
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                    Answered {endedAttemptView.questions.filter((question) => question.finalStatus === "answered").length}
+                  </span>
+                  <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                    Marked {endedAttemptView.questions.filter((question) => question.finalStatus === "marked").length}
+                  </span>
+                  <span className="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
+                    Skipped {endedAttemptView.questions.filter((question) => question.finalStatus === "skipped").length}
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                    Unattempted {endedAttemptView.questions.filter((question) => question.finalStatus === "unattempted").length}
+                  </span>
+                </div>
+
+                <div className="mt-5 space-y-3 text-sm text-muted-foreground">
+                  <div className="rounded-2xl bg-accent/30 p-4">
+                    <p className="font-semibold text-foreground">Longest dwell</p>
+                    <p className="mt-1">
+                      {endedAttemptView.highlights.longestQuestion?.questionLabel ?? "N/A"} spent {formatAnalyticsDuration(endedAttemptView.highlights.longestQuestion?.timeSpentSeconds ?? 0)}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-accent/30 p-4">
+                    <p className="font-semibold text-foreground">Most edited</p>
+                    <p className="mt-1">
+                      {endedAttemptView.highlights.mostEditedQuestion?.questionLabel ?? "N/A"} had {endedAttemptView.highlights.mostEditedQuestion?.answerChanges ?? 0} answer changes
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-accent/30 p-4">
+                    <p className="font-semibold text-foreground">Most revisited</p>
+                    <p className="mt-1">
+                      {endedAttemptView.highlights.mostRevisitedQuestion?.questionLabel ?? "N/A"} was revisited {endedAttemptView.highlights.mostRevisitedQuestion?.revisits ?? 0} times
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

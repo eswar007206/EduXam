@@ -9,11 +9,16 @@ export async function reportExamViolation(
   teacherId: string,
   subjectIdUuid: string
 ): Promise<void> {
-  await supabase.from('exam_violations').insert({
+  const { error } = await supabase.from('exam_violations').insert({
     student_id: studentId,
     teacher_id: teacherId,
     subject_id: subjectIdUuid,
   });
+
+  if (error) {
+    console.error("Failed to record exam violation", error);
+    throw error;
+  }
 }
 
 export interface ViolationRow {
